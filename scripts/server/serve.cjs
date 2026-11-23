@@ -695,7 +695,7 @@ function isVirtualOrSoftwareGpu(name) {
 let cachedPreferredVulkanBackend = null;
 let cachedPreferredVulkanBackendChecked = false;
 function getPreferredVulkanBackendName() {
-  const explicit = String(process.env.SD_VULKAN_DEVICE || process.env.UAIS_VULKAN_DEVICE || "").trim();
+  const explicit = String(process.env.SD_VULKAN_DEVICE || process.env.ABYX_VULKAN_DEVICE || process.env.UAIS_VULKAN_DEVICE || "").trim();
   if (/^vulkan\d+$/i.test(explicit)) return explicit.toLowerCase();
   if (/^\d+$/.test(explicit)) return `vulkan${explicit}`;
 
@@ -5591,7 +5591,7 @@ function startImageBackendDownload(backendId, redirectCount = 0, redirectUrl = "
   const client = url.startsWith("https") ? https : http;
   const request = client.get(url, {
     headers: {
-      "User-Agent": "Uncensored-AI-Studio/1.0 (+https://github.com/techjarves/Uncensored-AI-Studio)",
+      "User-Agent": "Abyx-Studio/1.0 (+https://github.com/Abyxen/Abyx-Studio)",
       "Accept": "application/zip, application/octet-stream, */*",
     },
   }, (response) => {
@@ -5823,7 +5823,7 @@ function startModelDownload(url, overrideFilename = null, targetDir = MODELS, ki
   const client = url.startsWith("https") ? https : http;
   const request = client.get(url, {
     headers: {
-      "User-Agent": "Uncensored-AI-Studio/1.0 (+https://github.com/techjarves/Uncensored-AI-Studio)",
+      "User-Agent": "Abyx-Studio/1.0 (+https://github.com/Abyxen/Abyx-Studio)",
       "Accept": "application/octet-stream, application/x-safetensors, */*",
       "Referer": "https://huggingface.co/",
     },
@@ -9510,7 +9510,7 @@ ${skillsContext}`;
 server.timeout = 0; // Disable socket timeout for large model uploads/downloads
 
 // Local-only by default: the UI has no login. Set UAIS_HOST=0.0.0.0 to share it on your network.
-server.listen(PORT_FRONTEND, process.env.UAIS_HOST || "127.0.0.1", () => {
+server.listen(PORT_FRONTEND, process.env.ABYX_HOST || process.env.UAIS_HOST || "127.0.0.1", () => {
   console.log("");
   console.log("  ============================================================");
   console.log("   ABYX UNIFIED AI STUDIO    |  Running");

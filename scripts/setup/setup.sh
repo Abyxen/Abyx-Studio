@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Uncensored AI Studio - Linux/macOS Setup Script
+# Abyx AI Studio - Linux/macOS Setup Script
 # Self-contained: no apt/yum/pacman, no global Node.js install.
 #
 
@@ -72,7 +72,7 @@ fi
 print_header() {
   echo ""
   echo "  ============================================================"
-  echo "   UNCENSORED AI STUDIO      -  $PLATFORM_LABEL First-Time Setup"
+  echo "   ABYX AI STUDIO      -  $PLATFORM_LABEL First-Time Setup"
   echo "   100% Self-Contained  |  No System Install Required"
   echo "  ============================================================"
   echo ""
@@ -254,8 +254,8 @@ check_linux_runtime_abi() {
   if [[ $unsupported -ne 0 ]]; then
     print_info "CyberRealistic and other valid models will fail before loading on this OS because the backend binary cannot start."
     print_info "Fix: use Ubuntu 24.04+, Fedora 40+, another glibc 2.38+ distro, or build stable-diffusion.cpp from source on this machine."
-    if [[ "${UAIS_ALLOW_UNSUPPORTED_LINUX:-0}" == "1" ]]; then
-      print_warn "Continuing anyway because UAIS_ALLOW_UNSUPPORTED_LINUX=1 is set."
+    if [[ "${ABYX_ALLOW_UNSUPPORTED_LINUX:-0}" == "1" ]]; then
+      print_warn "Continuing anyway because ABYX_ALLOW_UNSUPPORTED_LINUX=1 is set."
       return 0
     fi
     return 1

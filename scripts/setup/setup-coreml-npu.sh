@@ -49,7 +49,7 @@ coreml_venv_ready() {
 
 echo ""
 echo "  ============================================================"
-echo "   Uncensored AI Studio - Apple Silicon CoreML NPU Setup"
+echo "   Abyx AI Studio - Apple Silicon CoreML NPU Setup"
 echo "  ============================================================"
 echo ""
 
