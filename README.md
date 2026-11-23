@@ -21,7 +21,7 @@
 ## 📸 Overview & Interface
 
 <p align="center">
-  <img src="docs/screenshots/chat.jpg" alt="Abyx Chat & Code Workspace" width="920" style="border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);" />
+  <img src="docs/screenshots/chat.png" alt="Abyx Chat & Code Workspace" width="920" style="border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);" />
   <br />
   <sub><strong>Abyx Text & Code Workspace:</strong> Live streaming, DeepThink reasoning indicators, autonomous code generation, and live app execution.</sub>
 </p>
@@ -29,21 +29,21 @@
 <table>
   <tr>
     <td width="50%" align="center">
-      <img src="docs/screenshots/images.jpg" alt="Image Generation Workspace" style="border-radius: 8px;" />
+      <img src="docs/screenshots/images.png" alt="Image Generation Workspace" style="border-radius: 8px;" />
       <br /><sub><strong>Image Studio:</strong> Offline Stable Diffusion generation and prompt gallery.</sub>
     </td>
     <td width="50%" align="center">
-      <img src="docs/screenshots/transcribe.jpg" alt="Speech to Text Workspace" style="border-radius: 8px;" />
+      <img src="docs/screenshots/transcribe.png" alt="Speech to Text Workspace" style="border-radius: 8px;" />
       <br /><sub><strong>Speech to Text:</strong> Real-time local Whisper audio transcription.</sub>
     </td>
   </tr>
   <tr>
     <td width="50%" align="center">
-      <img src="docs/screenshots/voice.jpg" alt="Text to Speech Workspace" style="border-radius: 8px;" />
+      <img src="docs/screenshots/voice.png" alt="Text to Speech Workspace" style="border-radius: 8px;" />
       <br /><sub><strong>Voice Synthesis:</strong> Lifelike neural speech powered by Kokoro TTS.</sub>
     </td>
     <td width="50%" align="center">
-      <img src="docs/screenshots/models.jpg" alt="Model Manager Workspace" style="border-radius: 8px;" />
+      <img src="docs/screenshots/models.png" alt="Model Manager Workspace" style="border-radius: 8px;" />
       <br /><sub><strong>Model Hub:</strong> One-click local model management and Hugging Face imports.</sub>
     </td>
   </tr>
