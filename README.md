@@ -1,368 +1,305 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/branding/logo/mark-on-dark.svg" />
-    <img src="assets/branding/logo/mark.svg" alt="Portable AI Studio logo" width="120" height="120" />
-  </picture>
+  <img src="docs/logo.png" alt="Abyx Studio Logo" width="130" style="border-radius: 20px;" />
 </p>
 
 <h1 align="center">Abyx Studio</h1>
 
 <p align="center">
-  <strong>A premium, zero-configuration local & cloud AI workstation for LLMs (Chat, Coding & Agents), Stable Diffusion (Image Generation), Whisper (Speech-to-Text), and Kokoro (Text-to-Speech). Powered by hardware-accelerated GPU execution (CUDA, Vulkan, ROCm, Metal) and multi-provider cloud routing.</strong>
+  <strong>The all-in-one local & cloud AI workstation for Autonomous Agents, LLM Chat, Image Generation, Speech-to-Text, and Neural Voice Synthesis.</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Offline-100%25-green?style=for-the-badge&logo=offline" alt="100% Offline" />
-  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue?style=for-the-badge" alt="Platforms" />
-  <img src="https://img.shields.io/badge/License-MIT-orange?style=for-the-badge" alt="License" />
-</p>
-
-<p align="center">
-  🎥 <strong>Watch the Setup & Demo Video:</strong> <a href="https://youtu.be/yeFvP3SWMak">https://youtu.be/yeFvP3SWMak</a>
-</p>
-
-<p align="center">
-  <a href="https://youtu.be/yeFvP3SWMak">
-    <img src="https://img.youtube.com/vi/yeFvP3SWMak/maxresdefault.jpg" alt="Uncensored AI Studio Video Tutorial" width="800" style="border-radius: 8px;" />
-  </a>
+  <a href="#license"><img src="https://img.shields.io/badge/License-MIT-orange?style=for-the-badge" alt="License" /></a>
+  <a href="#getting-started"><img src="https://img.shields.io/badge/Offline-100%25%20Local%20First-green?style=for-the-badge" alt="100% Local First" /></a>
+  <a href="#hardware-acceleration"><img src="https://img.shields.io/badge/Hardware-CUDA%20%7C%20Vulkan%20%7C%20ROCm%20%7C%20Metal-blue?style=for-the-badge" alt="Hardware Acceleration" /></a>
+  <a href="#getting-started"><img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blueviolet?style=for-the-badge" alt="Multi-Platform" /></a>
+  <a href="https://github.com/Abyxen/Abyx-Studio"><img src="https://img.shields.io/badge/Status-Production%20Ready-emerald?style=for-the-badge" alt="Production Ready" /></a>
 </p>
 
 ---
 
-## <a id="screenshots"></a>📸 Screenshots
+## 📸 Overview & Interface
 
 <p align="center">
-  <img src="docs/screenshots/chat.jpg" alt="Offline chat with a local LLM" width="900" />
+  <img src="docs/screenshots/chat.jpg" alt="Abyx Chat & Code Workspace" width="920" style="border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);" />
   <br />
-  <sub><strong>Chat</strong> with local LLMs, fully offline</sub>
+  <sub><strong>Abyx Text & Code Workspace:</strong> Live streaming, DeepThink reasoning indicators, autonomous code generation, and live app execution.</sub>
 </p>
 
 <table>
   <tr>
     <td width="50%" align="center">
-      <img src="docs/screenshots/images.jpg" alt="Image generation with Stable Diffusion" />
-      <br /><sub><strong>Images:</strong> Stable Diffusion generation and gallery</sub>
+      <img src="docs/screenshots/images.jpg" alt="Image Generation Workspace" style="border-radius: 8px;" />
+      <br /><sub><strong>Image Studio:</strong> Offline Stable Diffusion generation and prompt gallery.</sub>
     </td>
     <td width="50%" align="center">
-      <img src="docs/screenshots/transcribe.jpg" alt="Speech to text with Whisper" />
-      <br /><sub><strong>Transcribe:</strong> speech to text with Whisper</sub>
+      <img src="docs/screenshots/transcribe.jpg" alt="Speech to Text Workspace" style="border-radius: 8px;" />
+      <br /><sub><strong>Speech to Text:</strong> Real-time local Whisper audio transcription.</sub>
     </td>
   </tr>
   <tr>
     <td width="50%" align="center">
-      <img src="docs/screenshots/voice.jpg" alt="Text to speech with Kokoro" />
-      <br /><sub><strong>Voice:</strong> natural text to speech with Kokoro</sub>
+      <img src="docs/screenshots/voice.jpg" alt="Text to Speech Workspace" style="border-radius: 8px;" />
+      <br /><sub><strong>Voice Synthesis:</strong> Lifelike neural speech powered by Kokoro TTS.</sub>
     </td>
     <td width="50%" align="center">
-      <img src="docs/screenshots/models.jpg" alt="Built-in model manager" />
-      <br /><sub><strong>Models:</strong> browse and download models in one click</sub>
+      <img src="docs/screenshots/models.jpg" alt="Model Manager Workspace" style="border-radius: 8px;" />
+      <br /><sub><strong>Model Hub:</strong> One-click local model management and Hugging Face imports.</sub>
     </td>
   </tr>
 </table>
 
 ---
 
-
 ## 📖 Table of Contents
-* [Screenshots](#screenshots)
-* [What is Portable AI Studio?](#what-is-uncensored-ai-studio)
-* [Key Features](#key-features)
-* [Workspace & Engine Architecture](#workspace-architecture)
-* [Supported Models](#supported-models)
-* [Folder Architecture](#folder-architecture)
-* [Getting Started](#getting-started)
-  * [Windows Setup](#windows-setup)
-  * [Linux Setup](#linux-setup)
-  * [macOS Setup](#macos-setup)
-* [Hardware Compatibility & Acceleration](#hardware-compatibility-acceleration)
-* [Troubleshooting & FAQ](#troubleshooting-faq)
-* [Building From Source](#building-from-source)
-* [Licensing](#licensing)
+* [What is Abyx Studio?](#what-is-abyx-studio)
+* [Key Capabilities](#key-capabilities)
+* [System Architecture](#system-architecture)
+* [Getting Started (Zero Configuration)](#getting-started)
+  * [Windows Quickstart](#windows-quickstart)
+  * [Linux Quickstart](#linux-quickstart)
+  * [macOS Quickstart](#macos-quickstart)
+* [Hardware Acceleration](#hardware-acceleration)
+* [Recommended Models](#recommended-models)
+* [Hybrid Cloud Routing](#hybrid-cloud-routing)
+* [Project Directory Layout](#project-directory-layout)
+* [Troubleshooting & FAQ](#troubleshooting--faq)
+* [Contributing & License](#license)
 
 ---
 
-## <a id="what-is-uncensored-ai-studio"></a>📖 What is Portable AI Studio?
+## 🌟 What is Abyx Studio?
 
-**Portable AI Studio** is a completely offline, zero-setup, self-contained AI studio for Windows, Linux, and macOS. Unlike cloud-based AI systems, it runs entirely on your own hardware with no censorship, tracking, subscriptions, or login requirements.
+**Abyx Studio** is an open-source, zero-configuration desktop AI workstation engineered for developers, researchers, and creators. It unifies high-performance local AI engines with an autonomous agentic framework, giving you full conversational AI, code execution, image creation, speech recognition, and neural voice synthesis—completely private, offline, and subscription-free.
 
-It unifies four major local AI capabilities into one high-performance desktop interface:
-1. **🎨 Image Generation (Stable Diffusion):** Generate and edit high-quality images offline using `.safetensors`, `.gguf`, or `.ckpt` model weights.
-2. **💬 Text Chat (LLMs):** Converse privately with open-source language models (GGUF format) powered by official, high-performance `llama.cpp` backends.
-3. **🎙️ Speech-to-Text (Whisper):** Transcribe voice recordings and speech to text in real-time with an integrated `whisper.cpp` engine.
-4. **🗣️ Text-to-Speech (Kokoro TTS):** Convert text outputs into highly natural, lifelike vocal audio offline using the `Kokoro-82M` ONNX model.
+When you need massive multi-modal reasoning beyond local hardware limits, Abyx Studio seamlessly routes queries to top-tier cloud models (Google Gemini 2.0, Claude 3.5/3.7, DeepSeek-R1, OpenAI o3-mini) using your own free or custom API keys.
 
 ---
 
-## <a id="key-features"></a>🌟 Key Features
+## 🚀 Key Capabilities
 
-*   **100% Offline & Private:** Run inferences locally. No internet, telemetry, cloud logging, or API keys required.
-*   **Zero-Install Portability:** Entire runtime (Node.js, models, GPU backends) is self-contained. Zero global system environment changes.
-*   **Auto-Configured Acceleration:** Auto-detects hardware specs to load CUDA (Nvidia), ROCm (AMD), Vulkan (Intel/AMD/NVIDIA), Metal (macOS), or OpenVINO (Intel NPU) backends.
-*   **Integrated Model Manager:** Paste Hugging Face URLs to download weights directly, or drag-and-drop local weights to import them.
-*   **Live Performance Monitor:** Track CPU, RAM, GPU, and VRAM utilization in real-time directly inside the web UI.
-*   **Local Output Gallery:** Saves generated images side-by-side with prompt parameters and metadata JSON files.
+### 1. 💬 Conversational Chat & Autonomous Coding Agent
+* **High-Speed GGUF Inference:** Powered by an optimized, hardware-accelerated `llama.cpp` server backend.
+* **Server-Sent Events (SSE):** Smooth, ultra-low latency token streaming directly into a responsive modern interface.
+* **DeepThink Status Tracking:** Real-time dynamic activity pills reflecting what the agent is doing (`Thinking…`, `Writing calculator.html…`, `Synthesizing audio…`, `Generating image…`).
+* **Contextual File Creation:** Automatically extracts generated code into designated files and names them intelligently based on conversation context (no more overwriting `index.html`).
+* **In-App Browser (`local://`):** Preview and test generated HTML5 web applications, dashboards, simulations, and games instantly inside the studio window.
+
+### 2. 🎨 Stable Diffusion Image Studio
+* **Native C++ Execution:** Powered by `stable-diffusion.cpp` with dedicated CUDA and Vulkan backends.
+* **Format Flexibility:** Load `.safetensors`, `.gguf`, or `.ckpt` weights (SD 1.5, SDXL, DreamShaper, CyberRealistic).
+* **Creative Controls:** Customize negative prompts, sampling steps, CFG scale, seed control, and resolution presets.
+* **Integrated Gallery:** View past generations with prompt parameters, timestamps, and generation seeds saved alongside each output.
+
+### 3. 🎙️ Local Speech Transcription (Whisper)
+* **Private Voice Dictation:** Integrated `whisper.cpp` engine converts voice notes and microphone recordings into text with zero cloud dependency.
+* **Multi-Language Support:** Auto-detects spoken languages or accepts explicit translation requests.
+
+### 4. 🗣️ Neural Text-to-Speech (Kokoro TTS)
+* **Human-Grade Voice Synthesis:** Driven by the `Kokoro-82M` ONNX model for natural, emotional vocal delivery.
+* **In-Chat Audio Player:** Play synthesized audio directly inside chat bubbles, view progress waveforms, and reveal audio files directly in Windows Explorer / Finder.
+
+### 5. 🧠 Living Memory & Persistent Knowledge
+* **Embedded SQLite Database:** Stores chat sessions, project logs, hardware telemetries, and long-term user memories without requiring external database setups.
+* **Autonomous Directive Interceptor:** Detects inline triggers like `[IMAGE: ...]` and `[AUDIO: ...]` to generate multimedia assets autonomously during conversation.
 
 ---
 
-## <a id="workspace-architecture"></a>⚙️ Workspace & Engine Architecture
+## 🏗️ System Architecture
 
-To avoid exhausting system RAM or VRAM, text and image engines are mutually exclusive by default. You can switch between workspaces inside the UI:
+Abyx Studio separates heavy neural computation into isolated native processes managed by an asynchronous Node.js coordination daemon, ensuring that GPU operations never block the frontend interface:
 
-*   **Image Generation Workspace:** Uses a dedicated `stable-diffusion.cpp` backend node. Model weights are stored in `app/models/`.
-*   **Text Chat Workspace:** Uses a portable `llama.cpp` server backend. Model weights (.gguf) are stored in `app/llm-models/`. A small Qwen2.5 Coder starter model can be downloaded directly from the Text Chat panel.
-*   **Speech Worker (Whisper):** Runs a localized `whisper-cli` process to convert your vocal input to text.
-*   **Audio Output (Kokoro TTS):** Utilizes `kokoro-js` locally on the server side to read responses in natural voices.
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           ABYX STUDIO FRONTEND                          │
+│          React 19  •  Vite  •  Lucide Icons  •  KaTeX  •  SSE           │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │ HTTP / Server-Sent Events (Port 1420)
+┌────────────────────────────────────▼────────────────────────────────────┐
+│                    NODE.JS ORCHESTRATION DAEMON                         │
+│   Process Supervision  •  Directive Parsers  •  SQLite  •  Cloud Hub    │
+└──────────┬──────────────────┬──────────────────┬─────────────────┬──────┘
+           │                  │                  │                 │
+    (Child Process)    (Child Process)    (Child Process)   (Child Process)
+           │                  │                  │                 │
+┌──────────▼────────┐┌────────▼────────┐┌────────▼────────┐┌───────▼──────┐
+│     llama.cpp     ││stable-diffusion ││   whisper.cpp   ││  Kokoro TTS  │
+│  LLM Engine GGUF  ││ Image Generator ││ Speech-to-Text  ││ Neural Voice │
+│ (CUDA / Vulkan)   ││ (CUDA / Vulkan) ││ (AVX2 / CUDA)   ││(ONNX Runtime)│
+└───────────────────┘└─────────────────┘└─────────────────┘└──────────────┘
+```
 
 ---
 
-## <a id="supported-models"></a>Supported Models
+## ⚡ Getting Started (Zero Configuration)
 
-The app is designed around single-file local models that can be loaded directly by the bundled backend engines.
+Abyx Studio requires **no pre-installed Node.js, Python, or complex dependencies**. Everything is bootstrapped automatically on first launch.
 
-### Image generation
+### Windows Quickstart
+1. Clone the repository:
+   ```cmd
+   git clone https://github.com/Abyxen/Abyx-Studio.git
+   cd Abyx-Studio
+   ```
+2. Double-click **`Abyx.bat`** (or run `Abyx.bat` from terminal).
+3. The automated setup will:
+   - Check and verify your GPU drivers and Visual C++ Redistributables.
+   - Install a self-contained portable Node.js toolchain into `app/tools/`.
+   - Download the matching hardware acceleration backends.
+   - Compile the frontend build into `app/dist/`.
+   - Automatically launch the workstation at **`http://localhost:1420`**.
 
-| Model type | Supported | Put files in | Notes |
+### Linux Quickstart
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Abyxen/Abyx-Studio.git
+   cd Abyx-Studio
+   ```
+2. Launch the studio:
+   ```bash
+   chmod +x linux.sh
+   ./linux.sh
+   ```
+
+### macOS Quickstart
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Abyxen/Abyx-Studio.git
+   cd Abyx-Studio
+   ```
+2. Launch with Metal acceleration:
+   ```bash
+   chmod +x mac.sh
+   ./mac.sh
+   ```
+
+---
+
+## 🎮 Hardware Acceleration
+
+Abyx Studio inspects your system hardware upon launch and initializes the best runtime:
+
+| Vendor | Platform | Accelerated Backend | Supported Hardware |
 | :--- | :--- | :--- | :--- |
-| Stable Diffusion 1.5 checkpoints | Yes | `app/models/` | Best compatibility. Use `.safetensors` or `.ckpt` files. |
-| SDXL checkpoints | Yes | `app/models/` | Supported as single-file checkpoints. Requires more RAM/VRAM than SD 1.5. |
-| Single-file SD/SDXL GGUF checkpoints | Limited | `app/models/` | Only complete single-file checkpoints are supported. |
-| OpenVINO image model folders | Intel NPU only | `app/openvino-models/` | Download from the Model Manager after running the OpenVINO setup. |
-| CoreML image models | Apple Silicon only | `app/models/` | Requires macOS on Apple Silicon and the CoreML setup path. |
-| Flux, HiDream, Hunyuan, Wan, Qwen Image, Z-Image workflows | No | N/A | These usually require separate diffusion, VAE, and text encoder files and are not one-click checkpoint loads in this app. |
-| LoRA, ControlNet, VAE-only, text-encoder-only, or diffusion-only files | No | N/A | Companion files are not loaded as standalone image models. |
-
-Known-good image models available from the Model Manager:
-
-| Name | Filename | Type | Approx. size | Recommended use |
-| :--- | :--- | :--- | :--- | :--- |
-| Juggernaut XL v9 Lightning | `Juggernaut_RunDiffusionPhoto2_Lightning_4Steps.safetensors` | SDXL | 7.1 GB | High-quality photorealism on mid/high tier machines. |
-| DreamShaper XL Lightning | `DreamShaperXL_Lightning.safetensors` | SDXL | 6.9 GB | General SDXL images, fantasy, renders, and illustration. |
-| DreamShaper 8 | `DreamShaper_8_pruned.safetensors` | SD 1.5 | 2.1 GB | Faster, lower-memory image generation. |
-| CyberRealistic V8 | `CyberRealistic_V8_FP16.safetensors` | SD 1.5 | 2.0 GB | Realistic SD 1.5 images and lower-memory systems. |
-| Rev Animated | `rev-animated-v1-2-2.safetensors` | SD 1.5 | 2.0 GB | Stylized/anime SD 1.5 images. |
-| LCM DreamShaper OpenVINO | `OpenVINO/LCM_Dreamshaper_v7-fp16-ov` | OpenVINO | 2.7 GB | Intel Core Ultra NPU test model. |
-
-### Text, speech, and TTS
-
-| Workspace | Supported model files | Put files in | Notes |
-| :--- | :--- | :--- | :--- |
-| Text Chat | `.gguf` llama.cpp models | `app/llm-models/` | Use single-file GGUF chat/instruct models. Vision models may also require a matching `mmproj` file. |
-| Speech-to-Text | whisper.cpp `.bin` models | `app/speech-models/` | Use Whisper GGML/whisper.cpp model files. |
-| Text-to-Speech | Kokoro `.json` manifests and model assets | `app/tts-models/` / `app/tts-runtime/` | Use the built-in Kokoro setup and Model Manager entries. |
-
-> [!NOTE]
-> Linux release binaries are built for Ubuntu 24.04-era systems and require `glibc 2.38+` plus `GLIBCXX_3.4.32+`. On older Ubuntu/Debian VMs, a model such as CyberRealistic may be valid but the backend can still fail before loading it. Upgrade the VM OS or build the backend from source.
+| **NVIDIA** | Windows / Linux | **CUDA 12.8 / cuBLAS** | RTX 50-series (Blackwell), RTX 40/30/20-series, GTX 16-series |
+| **AMD** | Windows / Linux | **ROCm / Vulkan** | Radeon RX 7000/6000-series, ROG Ally, Steam Deck |
+| **Intel** | Windows / Linux | **Vulkan / OpenVINO** | Intel Arc A-Series GPUs, Intel Core Ultra NPUs |
+| **Apple** | macOS | **Metal Performance Shaders** | Apple Silicon M1, M2, M3, M4 (Pro, Max, Ultra) |
+| **Universal** | All | **CPU (AVX2 / AVX-512)** | Any x86_64 or ARM64 processor |
 
 ---
 
-## <a id="folder-architecture"></a>📁 Folder Architecture
+## 🧠 Recommended Models
+
+All local text models must be in **GGUF format** and placed into [app/llm-models/](app/llm-models/):
+
+| Model | Size (Q4_K_M) | Recommended Hardware | Primary Strength |
+| :--- | :--- | :--- | :--- |
+| **Qwen 2.5 Coder 7B Instruct** | ~4.7 GB | 8 GB VRAM (RTX 3060/4060/5060) | **Best-in-class coding agent**, HTML5/JS games, tools. |
+| **DeepSeek-R1-Distill-Qwen-8B** | ~5.1 GB | 8 GB VRAM | **Deep chain-of-thought reasoning**, math, architecture. |
+| **Llama 3.1 8B Instruct** | ~4.9 GB | 8 GB VRAM | High-speed creative writing, dialogue, structured JSON. |
+| **Gemma 2 9B Instruct** | ~5.5 GB | 8 GB VRAM | High factual precision, analytical Q&A. |
+| **Qwen 2.5 Coder 14B (Q3_K_M)** | ~7.5 GB | 8 GB - 12 GB VRAM | Near GPT-4 level software engineering locally. |
+
+> [!TIP]
+> Download any GGUF directly from Hugging Face into `app/llm-models/`, and it will immediately appear in the model selector dropdown inside Abyx Studio.
+
+---
+
+## 🌐 Hybrid Cloud Routing
+
+Need massive multi-file coding or multi-modal analysis that exceeds your local GPU? Abyx Studio includes a built-in Cloud AI Router:
+
+1. In Abyx Studio, click **⚙️ Configure Cloud Providers**.
+2. Add your API keys (stored safely in local memory):
+   * **Google Gemini** (Free tier available on Google AI Studio — *Gemini 2.0 Flash / Pro*)
+   * **OpenRouter** (Unified access to *Claude 3.5/3.7 Sonnet*, *DeepSeek-R1 671B*, etc.)
+   * **Anthropic** (*Claude 3.5 Sonnet / Haiku*)
+   * **Groq** (Ultra-fast cloud inference)
+   * **OpenAI** (*GPT-4o, o3-mini*)
+3. Switch between local offline inference and cloud super-intelligence seamlessly from the model selector.
+
+---
+
+## 📁 Project Directory Layout
 
 ```
 Abyx-Studio/
-├── Abyx.bat                   # Windows Launcher (Double-click entrypoint)
-├── linux.sh                   # Linux Launcher (Terminal entrypoint)
-├── mac.sh                     # macOS Launcher (Terminal entrypoint)
+├── Abyx.bat                   # Windows 1-Click Launch & Setup
+├── linux.sh                   # Linux Terminal Entrypoint
+├── mac.sh                     # macOS Metal Entrypoint
 ├── LICENSE                    # MIT Open Source License
-├── .gitignore                 # Excludes models, backends & private data from git
-├── README.md                  # System documentation
+├── .gitignore                 # Production ignore list (protects private data & weights)
+├── README.md                  # Comprehensive Documentation
+├── agent/                     # Autonomous agent logic, loop supervisors & tools
+├── app/
+│   ├── frontend/              # Modern React 19 + Vite frontend source code
+│   │   ├── src/components/    # TextChat, Generator, ModelManager, Speech, Voice
+│   │   └── package.json       # UI dependencies
+│   ├── dist/                  # Precompiled production frontend build
+│   ├── config/                # Runtime inference settings and context limits
+│   ├── models/                # Local Stable Diffusion weights (.safetensors)
+│   ├── llm-models/            # Local LLM weights (.gguf)
+│   ├── speech-models/         # Local Whisper speech weights (.bin)
+│   └── tts-models/            # Local Kokoro neural voice weights
+├── automations/               # Scheduled workflows and routine tasks
+├── docs/                      # Screenshots, branding, and guides
+├── extensions/                # Pluggable capabilities and tooling modules
+├── harness/                   # Sandbox environment for code execution & testing
+├── providers/                 # API client adapters for cloud providers
+├── rag/                       # Local retrieval-augmented generation engine
 ├── scripts/
-│   ├── setup/                 # Platform setup and automatic backend installers
-│   ├── reset/                 # Clean install & environment repair
-│   ├── server/                # UI web server and engine lifecycle manager
-│   ├── workers/               # Local worker processes
-│   ├── build/                 # Optional source build helpers
-│   └── config/                # Runtime configuration catalogs
-└── app/
-    ├── frontend/              # UI source code (Vite + React)
-    ├── dist/                  # Prebuilt production frontend
-    ├── models/                # Place image weights here (.safetensors, .gguf)
-    ├── llm-models/            # Place text GGUF weights here
-    └── outputs/               # Saved images and parameters metadata
+│   ├── server/serve.cjs       # Core Node.js backend orchestrator & daemon
+│   ├── setup/setup.ps1        # Windows automated bootstrapper & runtime installer
+│   ├── setup/setup.sh         # Linux/macOS bootstrapper
+│   └── build/                 # Source build tools for CUDA/Vulkan backends
+├── security/                  # Path guards, input sanitation & execution policies
+├── services/                  # Memory, skills, and background workers
+└── skills/                    # Specialized AI agent skills library
 ```
 
 ---
 
-## <a id="getting-started"></a>🚀 Getting Started
-
-Ensure you have a modern web browser installed. Follow the quick guide below for your platform:
-
-### Windows Setup
-
-1. **Launch:** Double-click **`Abyx.bat`** (or `windows.bat`).
-   > [!NOTE]
-   > On the first run, the script will automatically download a portable Node.js runtime and configure pre-compiled GPU/CPU backend binaries.
-2. **Add Models:** Drop `.safetensors`, `.gguf`, or `.ckpt` weights into `app/models/` (or download them via the **Model Manager** tab in the UI).
-3. **Generate:** Open `http://localhost:1420` in your browser, select your model, and write a prompt.
-
-### Linux Setup
-
-1. **Make executable:** Open a terminal in the project folder and make the script executable:
-   ```bash
-   chmod +x linux.sh
-   ```
-2. **Launch:** Run **`./linux.sh`**.
-   - **NVIDIA GPU Users:** You will be prompted to set up the high-performance **CUDA** backend (downloads prebuilt or automatically compiles from source as a fallback).
-   - **AMD Radeon Performance:** Run with **`./linux.sh --max-perf`** to add the ROCm backend (~1.3 GB download).
-   - **Intel Core Ultra NPU:** Run with **`./linux.sh --setup-openvino`** to configure Intel NPU support (requires Intel Linux NPU driver).
-3. **Add Models:** Drop your weights into `app/models/` or download them via the **Model Manager** tab.
-4. **Generate:** Open `http://localhost:1420` in your browser.
-
-### macOS Setup
-
-1. **Make executable:** Open a terminal in the project folder and make the script executable:
-   ```bash
-   chmod +x mac.sh
-   ```
-2. **Launch:** Run **`./mac.sh`**.
-   > [!IMPORTANT]
-   > The prebuilt macOS backend is optimized for **Apple Silicon (M1 or newer)** and uses **Metal** GPU acceleration. *(macOS Intel hardware is completely unsupported)*.
-3. **Add Models:** Drop your weights into `app/models/` or download them via the **Model Manager** tab.
-4. **Generate:** Open `http://localhost:1420` in your browser.
-
----
-
-## <a id="hardware-compatibility-acceleration"></a>🖥️ Hardware Compatibility & Acceleration
-
-### Windows
-
-| GPU Vendor | Tech | Status | Notes |
-| :--- | :--- | :--- | :--- |
-| **Nvidia** | CUDA | ✅ Native | Maps `sd-cuda.exe` with Nvidia SDK 12 optimizations. |
-| **AMD Radeon** | Vulkan | ✅ Native | Maps `sd-vulkan.exe` with Vulkan API acceleration. |
-| **Intel Arc** | Vulkan | ✅ Native | Maps `sd-vulkan.exe` for Intel hardware. |
-| **Integrated / None** | CPU | ⚠️ Fallback | Runs on logical CPU threads (slow). |
-
-### Linux
-
-| GPU Vendor | Primary | Fallback | Notes |
-| :--- | :--- | :--- | :--- |
-| **NVIDIA** | CUDA / Vulkan | Vulkan / CPU | Auto-detects NVIDIA. Prompt-driven CUDA setup downloads prebuilt or compiles from source. Falls back to Vulkan for GTX. |
-| **AMD Radeon** | ROCm | Vulkan | ROCm provides best AMD performance when host ROCm drivers are available. |
-| **Intel Arc / integrated** | Vulkan | CPU | Cross-vendor Vulkan support. |
-| **Intel Core Ultra NPU** | OpenVINO NPU | CPU | Requires the Intel Linux NPU driver, kernel 6.6+, Python 3, and `./linux.sh --setup-openvino`. |
-| **Integrated / None** | CPU | — | Runs on logical CPU threads (slow). |
-
-### macOS
-
-| Hardware | Primary | Fallback | Notes |
-| :--- | :--- | :--- | :--- |
-| **Apple Silicon (M1 or newer)** | Metal | CPU | Uses the official Darwin arm64 stable-diffusion.cpp backend. |
-
-> [!IMPORTANT]
-> **System Requirements & Notes:**
-> - **64-bit Windows 10 or Windows 11** is required for the portable Node.js 22 runtime used by the Windows launcher.
-> - **glibc 2.38 or newer** is required for the prebuilt Linux backends (Ubuntu 24.04, Fedora 40+, etc.). The setup script will warn you if your glibc is older.
-> - **Linux runtime libraries:** The prebuilt backends require `libgomp.so.1`; Vulkan additionally requires `libvulkan.so.1` and a working GPU driver. The setup script now checks these before installing a backend and prints the exact distro package command when one is missing.
-> - **Linux OpenVINO NPU:** Intel Core Ultra, x86_64 Linux, kernel 6.6+, a working `/dev/accel/accel0` device, Python 3 with `venv`, and the Intel Linux NPU driver are required.
-
----
-
-## <a id="troubleshooting-faq"></a>🛠️ Troubleshooting & FAQ
+## 🔧 Troubleshooting & FAQ
 
 <details>
-  <summary><strong> Reset Environment: If a build fails or you want to clear dependencies</strong></summary>
-  <p>Run <code>scripts/reset/reset.ps1</code> (Windows) or <code>scripts/reset/reset.sh</code> (Linux/macOS). This will clear temporary compilation and package caches to repair your environment. <em>(Note: This preserves your model weights and generated output images).</em></p>
+  <summary><strong>Windows exits with code <code>3221225781</code> (0xC0000135)</strong></summary>
+  <p>This code indicates a missing system DLL. Run <code>scripts/setup/setup.ps1</code> or download and install the official <a href="https://aka.ms/vc14/vc_redist.x64.exe">Microsoft Visual C++ 2015-2022 Redistributable (x64)</a>, restart Windows, and relaunch <code>Abyx.bat</code>.</p>
 </details>
 
 <details>
-  <summary><strong> Linux backends fail to start with <code>GLIBC_2.38 not found</code></strong></summary>
-  <p>The prebuilt binaries require glibc 2.38+ (e.g. Ubuntu 24.04). If your distribution uses an older glibc version, you can upgrade your operating system or compile the backend from source (see the <a href="#building-from-source">Building From Source</a> guide below).</p>
+  <summary><strong>Model fails to load: <code>unknown model architecture: 'inkling2_loop'</code></strong></summary>
+  <p>Models using experimental custom architectures (like Inkling 2 Looped MoE) require specialized layer-unrolling patches not yet in standard llama.cpp releases. For best results, use standard transformer architectures such as <strong>Qwen 2.5</strong>, <strong>Llama 3.1</strong>, <strong>Mistral</strong>, or <strong>Gemma 2</strong>.</p>
 </details>
 
 <details>
-  <summary><strong> Port Conflicts: Default port address already busy</strong></summary>
-  <p>The web user interface runs on port <code>1420</code> by default. The GPU backend manager attempts to bind to port <code>8080</code> first, then automatically detects and falls back to a free system port if <code>8080</code> is already occupied.</p>
+  <summary><strong>How do I change the default port?</strong></summary>
+  <p>Abyx Studio runs on port 1420 by default. To change it, set the environment variable before starting:</p>
+  <pre><code>set FRONTEND_PORT=3000
+Abyx.bat</code></pre>
 </details>
 
 <details>
-  <summary><strong> Opening the studio from another device on your network</strong></summary>
-  <p>The web interface only accepts connections from the computer it runs on, because it has no login. To reach it from another device on purpose, start it with <code>UAIS_HOST=0.0.0.0</code> (for example <code>UAIS_HOST=0.0.0.0 ./linux.sh</code>, or <code>set UAIS_HOST=0.0.0.0</code> before running <code>windows.bat</code>). Anyone on that network can then use it.</p>
-</details>
-
-<details>
-  <summary><strong> Linux ROCm not loading for AMD Radeon GPUs</strong></summary>
-  <p>Ensure your AMD GPU hardware and host kernel are fully compatible with ROCm 7.13. If ROCm fails to initialize correctly, the application will automatically fall back to Vulkan acceleration.</p>
-</details>
-
-<details>
-  <summary><strong> Linux uses the integrated GPU instead of the discrete GPU</strong></summary>
-  <p>On dual-GPU Linux systems, Vulkan device order can put the integrated Intel GPU at <code>vulkan0</code> and the discrete AMD/NVIDIA GPU at <code>vulkan1</code>. The launcher now tries to prefer a discrete Vulkan device when <code>vulkaninfo --summary</code> is available. To force a device manually, start the app with <code>SD_VULKAN_DEVICE=vulkan1 ./linux.sh</code> or use another index such as <code>vulkan0</code>/<code>vulkan2</code>.</p>
-</details>
-
-<details>
-  <summary><strong> Windows exits with code <code>3221225781</code> (0xC0000135)</strong></summary>
-  <p>This code means Windows could not locate a required backend DLL:</p>
-  <ul>
-    <li><strong>For AMD/Intel Vulkan:</strong> Rerun <code>scripts/setup/setup.ps1</code>. Setup installs the required Microsoft Visual C++ x64 runtime and replaces stale Vulkan binaries with the compatible pinned build. Approve the Windows administrator prompt when it appears.</li>
-    <li><strong>For NVIDIA CUDA:</strong> Install or update your NVIDIA graphics driver, then rerun the setup script to restore the CUDA runtime DLLs.</li>
-  </ul>
-  <p>If setup cannot install the runtime, install Microsoft's official <a href="https://aka.ms/vc14/vc_redist.x64.exe">Visual C++ Redistributable for x64</a> manually, restart Windows, and rerun setup. A custom Vulkan build is not the first fix for this exit code.</p>
-</details>
-
-<details>
-  <summary><strong> Windows exits with code <code>3221225501</code> (0xC000001D)</strong></summary>
-  <p>This is an illegal CPU instruction from an older machine-specific Windows backend build; it is not evidence that the model or RTX GPU is unsupported. Rerun <code>scripts/setup/setup.ps1</code> to replace the CPU/CUDA binaries with runtime-dispatched builds and install the matching CUDA 12.8 runtime. The corrected CUDA package includes Blackwell targets for RTX 50-series GPUs.</p>
-</details>
-
-<details>
-  <summary><strong> Generation shows "server is not responding or crashed"</strong></summary>
-  <p>This indicates that the local backend engine process terminated. Check your launch terminal (where you executed <code>windows.bat</code>, <code>./linux.sh</code>, or <code>./mac.sh</code>) for the exact console error. Common causes include glibc version mismatches, missing Vulkan drivers, or system out-of-memory (OOM) issues.</p>
+  <summary><strong>How do I share Abyx across my local network (LAN)?</strong></summary>
+  <p>Set <code>UAIS_HOST=0.0.0.0</code> in your environment before starting Abyx to bind to all network interfaces.</p>
 </details>
 
 ---
 
-## <a id="building-from-source"></a>🔨 Building From Source
+## 📄 License
 
-The setup script (`scripts/setup/setup.sh`) now automates building and setting up the CUDA backend from source when selected. If you want to manually build all backends (CPU, Vulkan, and CUDA) at once, you can run the included `scripts/build/build_from_source.sh` script.
+This project is open-source and licensed under the [MIT License](LICENSE).
 
-For macOS, the included `scripts/build/build_from_source.sh` builds the Metal backend and copies it to `app/backend/mac/sd`.
-
-### Requirements
-- `git`, `cmake`, `make` (or `ninja`), and a C++17 compiler (`g++` / `clang++`).
-- For **CUDA**: the NVIDIA CUDA toolkit (`nvcc`) must be on your `PATH`.
-- For **Vulkan**: the Vulkan SDK / loader, a compatible driver, and `glslc` (Ubuntu/Debian package: `glslc`).
-- For **ROCm**: AMD ROCm development libraries.
-- For **macOS Metal**: Apple Command Line Tools or Xcode.
-
-### Build commands
-
-```bash
-# 1. Clone upstream
-git clone https://github.com/leejet/stable-diffusion.cpp.git
-cd stable-diffusion.cpp
-mkdir build && cd build
-
-# 2. Configure for your backend (pick ONE)
-# CPU only
-cmake .. -DSD_BUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release
-
-# CUDA
-cmake .. -DSD_CUDA=ON -DSD_BUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release
-
-# Vulkan
-cmake .. -DSD_VULKAN=ON -DSD_BUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release
-
-# ROCm
-cmake .. -DSD_HIPBLAS=ON -DSD_BUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release
-
-# macOS Metal
-cmake .. -DSD_METAL=ON -DSD_BUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release
-
-# 3. Build
-cmake --build . --config Release -j$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu)
-
-# 4. Copy the binaries into this project
-cp bin/sd* /path/to/Portable-AI-Studio/app/backend/linux/<backend>/
-```
-
-After copying, rename the server binary to match what `scripts/server/serve.cjs` expects:
-- Vulkan: `sd` → `sd-vulkan`
-- ROCm: `sd` → `sd-rocm`
-
-Then restart the app with `./linux.sh` (Linux) or `./mac.sh` (macOS).
+### Acknowledgments & Ecosystem
+Abyx Studio is made possible thanks to the open-source AI community:
+* [llama.cpp](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov & contributors.
+* [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) by Leejet & contributors.
+* [whisper.cpp](https://github.com/ggerganov/whisper.cpp) by Georgi Gerganov.
+* [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) by Hexgrad & [kokoro-js](https://github.com/taylorchu/kokoro-js).
+* [React](https://react.dev/) & [Vite](https://vite.dev/).
 
 ---
 
-## <a id="licensing"></a>📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file. Bundles [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (MIT License). Model weights are subject to their respective creators' licenses.
+<p align="center">
+  <strong>Built with precision by <a href="https://github.com/Abyxen">Abyxen</a></strong>
+</p>
