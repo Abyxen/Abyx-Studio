@@ -1,0 +1,36 @@
+{
+  "models": {
+    "AbyxV2 9B.gguf": {
+      "preferredBackend": "cuda",
+      "lastBackendMode": "Auto (CUDA/CPU)",
+      "lastBackendBinary": "llama-server.exe",
+      "lastSettings": {
+        "threads": 16,
+        "contextSize": 262144,
+        "gpuLayers": -1,
+        "cacheTypeK": "q4_0",
+        "cacheTypeV": "q4_0",
+        "batchSize": 512,
+        "ubatchSize": 512,
+        "flashAttn": true
+      },
+      "updatedAt": "2026-11-23T20:32:50.909Z"
+    },
+    "gemma-4-26B-A4B-it-uncensored-Q4_K_M.gguf": {
+      "preferredBackend": "cuda",
+      "lastBackendMode": "Auto (CUDA/CPU)",
+      "lastBackendBinary": "llama-server.exe",
+      "lastSettings": {
+        "threads": 16,
+        "contextSize": 4096,
+        "gpuLayers": -1,
+        "cacheTypeK": "q4_0",
+        "cacheTypeV": "q4_0",
+        "batchSize": 256,
+        "ubatchSize": 256,
+        "flashAttn": true
+      },
+      "updatedAt": "2026-11-23T19:59:51.801Z"
+    }
+  }
+}

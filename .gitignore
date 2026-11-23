@@ -1,0 +1,86 @@
+# =============================================================================
+# Abyx AI Studio - Production .gitignore
+# Excludes models, backend binaries, personal logs, chat databases & runtime caches
+# =============================================================================
+
+# AI Models (downloaded via in-app Model Hub)
+app/models/
+app/openvino-models/
+app/llm-models/
+app/speech-models/
+app/tts-models/
+*.gguf
+*.safetensors
+*.bin
+*.onnx
+*.pt
+
+# Downloaded Portable Backends & Toolchains (managed by setup.ps1 / setup.sh)
+app/backend/
+app/llm-backend/
+app/speech-backend/
+app/tts-runtime/
+app/tools/
+*.zip
+*.tar
+*.tar.gz
+*.tar.xz
+*.7z
+*.rar
+*.part
+*.tmp
+*.tmp-*
+
+# User Databases, Secrets, Private Data & Chat History
+app/data/
+data/
+app/chat-history/
+app/transcriptions/
+app/tts-outputs/
+app/tts-cache/
+app/outputs/
+app/cache/
+app/video-outputs/
+app/workspace/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+secure_vault/
+
+# Private Logs, Personal Documents & School PAP Files
+*.log
+project.log
+PROJECT_LOG.md
+PAP_TGPSI_*
+abyx_frontend.zip
+*.lnk
+test_*
+scratch_*
+*.txt.out
+
+# Dependencies
+node_modules/
+**/node_modules/
+**/node_modules_*/
+**/node_modules_windows/
+**/node_modules_linux/
+**/node_modules_mac/
+**/.active_modules_os
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment & API Key Files
+.env
+.env.*
+!.env.example
+
+# OS & Editor Files
+.vscode/
+.idea/
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
