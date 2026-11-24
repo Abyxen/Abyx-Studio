@@ -13,6 +13,14 @@ const { spawn, spawnSync, execSync, exec, execFile } = require("child_process");
 const { comprehensiveWebSearch } = require("../search/core");
 const { detectModelKindCached } = require("./model-kind.cjs");
 
+// Safe crash guards for unhandled network resets and rejections
+process.on("uncaughtException", (err) => {
+  console.warn("  [server] Uncaught exception safely handled:", err?.message || err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.warn("  [server] Unhandled rejection safely handled:", reason?.message || reason);
+});
+
 // HTTP keep-alive agent for llama-server (eliminates TCP handshake per request)
 const llmHttpAgent = new http.Agent({
   keepAlive: true,
@@ -7879,11 +7887,20 @@ async function doLlmChat(req, res, body, retryCount = 0, routedModelInfo = null)
             }
           }
         });
-        clientRes.on("error", (err) => res.destroy(err));
+        clientRes.on("error", (err) => {
+          console.warn("  [llm-stream] Client response error:", err?.message || err);
+          if (!res.writableEnded) {
+            try { res.end(); } catch (_) {}
+          }
+        });
+      });
+
+      res.on("error", (err) => {
+        console.warn("  [llm-stream] Outgoing response error:", err?.message || err);
       });
 
       clientReq.on("error", async (err) => {
-        console.error("LLM stream request error:", err);
+        console.warn("  [llm-stream] LLM stream request error:", err?.message || err);
         if (isOomError(err.message) && retryCount === 0) {
           try {
             await retryLowerContext();
@@ -7895,8 +7912,8 @@ async function doLlmChat(req, res, body, retryCount = 0, routedModelInfo = null)
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: false, error: err.message }));
-        } else {
-          res.end();
+        } else if (!res.writableEnded) {
+          try { res.end(); } catch (_) {}
         }
       });
 
