@@ -950,7 +950,7 @@ function Settings({
             <SettingRow title="Token limit" description="Longest reply the model may write">
               <Slider
                 label="Token limit"
-                value={pendingTextSettings.maxTokens || 8192}
+                value={pendingTextSettings.maxTokens || 16384}
                 min={256}
                 max={32768}
                 step={256}

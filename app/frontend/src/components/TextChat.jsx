@@ -221,7 +221,8 @@ function ChatThinkingSection({
   sources = [],
   content = "",
   detectedFile = null,
-  generationStats = null
+  generationStats = null,
+  actionText = ""
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -259,17 +260,37 @@ function ChatThinkingSection({
   const hasImageDirective = /data-generate="([^"]+)"|\[IMAGE:\s*([^\]]+)\]/i.test(textContent);
   const hasAudioDirective = /\[AUDIO:\s*([^\]]+)\]/i.test(textContent);
 
-  // Dynamic pill status matching modern AI harnesses
+  const isImageAction = actionText && /image|photo|picture|draw/i.test(actionText);
+  const isAudioAction = actionText && /audio|voice|speech|synthesiz/i.test(actionText);
+  const isCodeAction = actionText && /working on|writing code/i.test(actionText);
+
+  // Dynamic pill status matching modern AI harnesses — single unified thinking section
   let icon = <Brain size={13} style={{ color: "#a5b4fc" }} />;
   let label = isComplete ? `Thought process${formattedTime}` : `Thinking...${formattedTime}`;
 
-  if (filename) {
+  if (!isComplete && actionText && actionText !== "Thinking…") {
+    label = `${actionText}${formattedTime}`;
+    if (isImageAction) icon = <ImageIcon size={13} style={{ color: "#38bdf8" }} />;
+    else if (isAudioAction) icon = <Volume2 size={13} style={{ color: "#22c55e" }} />;
+    else if (isCodeAction) icon = <Code2 size={13} style={{ color: "#38bdf8" }} />;
+    else if (isWeb) icon = <Globe size={13} style={{ color: "#38bdf8" }} />;
+  } else if (filename) {
     icon = isComplete 
       ? <CheckCircle size={13} style={{ color: "#10b981" }} />
       : <Code2 size={13} style={{ color: "#38bdf8" }} />;
     label = isComplete 
       ? `Worked on ${filename}${formattedTime}`
-      : `Working on ${filename}...`;
+      : `Working on ${filename}...${formattedTime}`;
+  } else if (hasImageDirective || isImageAction) {
+    icon = isComplete 
+      ? <CheckCircle size={13} style={{ color: "#10b981" }} />
+      : <ImageIcon size={13} style={{ color: "#38bdf8" }} />;
+    label = isComplete ? `Generated image${formattedTime}` : `Generating image...${formattedTime}`;
+  } else if (hasAudioDirective || isAudioAction) {
+    icon = isComplete 
+      ? <CheckCircle size={13} style={{ color: "#10b981" }} />
+      : <Volume2 size={13} style={{ color: "#22c55e" }} />;
+    label = isComplete ? `Synthesized audio${formattedTime}` : `Synthesizing audio...${formattedTime}`;
   } else if (isWeb) {
     icon = <Globe size={13} style={{ color: "#38bdf8" }} />;
     label = isComplete 
@@ -395,7 +416,13 @@ function ChatThinkingSection({
       >
         <span style={{ display: "flex", alignItems: "center" }}>{icon}</span>
         <span style={{ fontWeight: 500 }}>{label}</span>
-        {!isComplete && <LoaderCircle size={11} className="progress-spinner" style={{ color: "var(--accent-orange, #ff4b1f)", marginLeft: "2px" }} />}
+        {!isComplete && (
+          <LoaderCircle
+            size={11}
+            className="abyx-spin"
+            style={{ color: "var(--accent-orange, #ff4b1f)", marginLeft: "2px", flexShrink: 0 }}
+          />
+        )}
         <ChevronDown
           size={13}
           style={{
@@ -452,7 +479,7 @@ function ChatThinkingSection({
                   {st.status === "done" ? (
                     <CheckCircle size={14} style={{ color: "#10b981" }} />
                   ) : st.status === "in_progress" ? (
-                    <LoaderCircle size={14} className="progress-spinner" style={{ color: "#38bdf8" }} />
+                    <LoaderCircle size={13} className="abyx-spin" style={{ color: "#38bdf8", flexShrink: 0 }} />
                   ) : (
                     <Circle size={14} style={{ color: "rgba(255, 255, 255, 0.2)" }} />
                   )}
@@ -707,12 +734,10 @@ function TextChat({
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
   const getAutoMaxResponseTokens = (promptTokens, thinkingEnabled) => {
-    const contextLimit = Number(status.settings?.contextSize || textSettings?.contextSize || 262144);
-    const safetyBuffer = thinkingEnabled ? 768 : 512;
-    const preferredMinimum = thinkingEnabled ? 1024 : 512;
-    const available = contextLimit - promptTokens - safetyBuffer;
-    if (available <= 0) return 64;
-    return clamp(available, Math.min(preferredMinimum, available), Math.min(16384, Math.max(4096, available)));
+    const contextLimit = Number(status.settings?.contextSize || textSettings?.contextSize || 32768);
+    const safetyBuffer = thinkingEnabled ? 512 : 256;
+    const available = Math.max(4096, contextLimit - promptTokens - safetyBuffer);
+    return Math.min(32768, available);
   };
   
   const bottomRef = useRef(null);
@@ -1251,9 +1276,9 @@ function TextChat({
       let thinkingDuration = 0;
 
       const thinkingEnabled = deepThinkEnabled;
-      const manualMaxTokens = textSettings?.maxTokens || 8192;
+      const manualMaxTokens = textSettings?.maxTokens || 16384;
       const effectiveMaxTokens = textSettings?.responseTokenMode === "manual"
-        ? (thinkingEnabled ? Math.max(manualMaxTokens, 2048) : manualMaxTokens)
+        ? (thinkingEnabled ? Math.max(manualMaxTokens, 4096) : manualMaxTokens)
         : getAutoMaxResponseTokens(promptTokenEstimate, thinkingEnabled);
 
       let routedInfo = null;
@@ -2540,6 +2565,7 @@ function TextChat({
                             sources={message.webSources || []}
                             content={rawContent}
                             generationStats={message.generationStats}
+                            actionText={actionText}
                           />
                         )}
                         {(hasVisibleContent || message.error) && (
@@ -2576,31 +2602,19 @@ function TextChat({
                         )}
 
                         {message.role === "assistant" && message.generationStats && !message.error && (
-                          <>
-                            {message.generationStats.truncated && (
-                              <div className="chat-generation-warning">
-                                Response reached the token limit. Ask "continue" or switch Max Response Tokens to Manual for a larger cap.
-                              </div>
+                          <div className="chat-generation-stats" style={{ border: "none", background: "transparent", padding: 0 }}>
+                            {isComplete && (
+                              <>
+                                {message.routedModel && (
+                                  <span style={{ display: "inline-flex", alignItems: "center", color: "#38bdf8", fontWeight: "600", marginRight: "6px" }}>
+                                    <Sparkles size={12} style={{ marginRight: 4, flexShrink: 0 }} />
+                                    {message.routedModel.selectedModelName || message.routedModel.selectedModel} ({message.routedModel.providerName || "Cloud"}) ·
+                                  </span>
+                                )}
+                                {(message.model || message.generationStats.model || status.settings?.model || "AbyxV2 9B").replace(/\.gguf$/i, "")} · {formatGenerationTime(message.generationStats.seconds)} · {message.generationStats.tokens} tokens
+                              </>
                             )}
-                            <div className="chat-generation-stats" style={{ border: "none", background: "transparent", padding: 0 }}>
-                              {!isComplete && isBusy ? (
-                                <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", border: "none", background: "transparent", color: "rgba(255, 255, 255, 0.7)", fontSize: "13px" }}>
-                                  <LoaderCircle size={14} className="progress-spinner" style={{ color: "rgba(255, 255, 255, 0.6)" }} />
-                                  <span>{actionText}</span>
-                                </div>
-                              ) : (
-                                <>
-                                  {message.routedModel && (
-                                    <span style={{ display: "inline-flex", alignItems: "center", color: "#38bdf8", fontWeight: "600", marginRight: "6px" }}>
-                                      <Sparkles size={12} style={{ marginRight: 4, flexShrink: 0 }} />
-                                      {message.routedModel.selectedModelName || message.routedModel.selectedModel} ({message.routedModel.providerName || "Cloud"}) ·
-                                    </span>
-                                  )}
-                                  {(message.model || message.generationStats.model || status.settings?.model || "AbyxV2 9B").replace(/\.gguf$/i, "")} · {formatGenerationTime(message.generationStats.seconds)} · {message.generationStats.tokens} tokens
-                                </>
-                              )}
-                            </div>
-                          </>
+                          </div>
                         )}
 
                         {/* Message Action Bar (Abyx Behavior) */}
@@ -2673,6 +2687,19 @@ function TextChat({
                                 <RotateCcw size={13} />
                                 <span>Regenerate</span>
                               </button>
+                              {message.generationStats?.truncated && isComplete && (
+                                <button
+                                  type="button"
+                                  className="chat-msg-action-btn"
+                                  onClick={() => handleSendMessage("continue")}
+                                  disabled={isBusy}
+                                  style={{ color: "#38bdf8" }}
+                                  title="Continue generating remaining content"
+                                >
+                                  <Play size={12} fill="#38bdf8" />
+                                  <span>Continue</span>
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className={`chat-msg-action-btn ${speakingIdx === index ? "speaking active" : ""}`}

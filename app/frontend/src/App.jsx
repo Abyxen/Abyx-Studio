@@ -202,7 +202,7 @@ function App() {
         return {
           ...parsed,
           enableThinking: parsed.enableThinking === true,
-          maxTokens: !parsed.maxTokens || parsed.maxTokens < 4096 ? 8192 : parsed.maxTokens,
+          maxTokens: !parsed.maxTokens || parsed.maxTokens < 8192 ? 16384 : parsed.maxTokens,
           responseTokenMode: parsed.responseTokenMode || "auto",
         };
       } catch (_) {}
@@ -215,7 +215,7 @@ function App() {
       enableThinking: false,
       // New performance settings
       gpuLayers: -1,
-      maxTokens: 8192,
+      maxTokens: 16384,
       responseTokenMode: "auto",
       topP: 0.95,
       topK: 40,
