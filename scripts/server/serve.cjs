@@ -1327,11 +1327,13 @@ function pollNvidiaVram(force = false) {
   );
 }
 
-// Start background VRAM polling (runs every 5 seconds, only active when backend is idle)
-setInterval(() => pollNvidiaVram(false), 5000);
+// On-demand VRAM telemetry: only polls when requested by UI, eliminating background idle CPU/GPU wakeups
 pollNvidiaVram(true);
 
 function getNvidiaVram() {
+  if (Date.now() - lastVramPollTime > 5000) {
+    pollNvidiaVram(false);
+  }
   return cachedVramInfo;
 }
 
@@ -1401,10 +1403,13 @@ function pollLlamaVram(force = false) {
   );
 }
 
-setInterval(() => pollLlamaVram(false), 5000);
+// On-demand Llama VRAM polling
 pollLlamaVram(true);
 
 function getLlamaVram() {
+  if (Date.now() - lastLlamaVramPollTime > 5000) {
+    pollLlamaVram(false);
+  }
   return cachedLlamaVramInfo;
 }
 
@@ -1520,7 +1525,6 @@ function pollMacRam() {
 
 if (osPlatform === "darwin") {
   pollMacRam();
-  setInterval(pollMacRam, 5000);
 }
 
 function getHardwareSpecs() {
@@ -7594,33 +7598,47 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
   // Autonomous Media Generation extraction:
   const createdMedia = [];
 
-  const asksAudio = /\b(audio|speech|voice|podcast|read\s+aloud|narrat\w*|speak|sound|wav|mp3|say)\b/i.test(pLower);
-  const asksImage = /\b(image|picture|photo|illustration|drawing|artwork|visual|wallpaper|render\s+an?\s+image|png|jpg)\b/i.test(pLower);
-  const asksCodeOrHtml = /\b(html|website|webpage|page|app|code|script|css|game)\b/i.test(pLower);
+  // Precision intent classification for media generation
+  const isAudioIntent = /\b(?:generate|create|make|produce|synthesize|record|convert|turn)\s+(?:both\s+)?(?:an?\s+)?(?:audio|speech|voice|podcast|voiceover|narration|sound\s+clip|recording|spoken\s+word)\b|\b(?:convert|turn)\s+(?:[\w\s]{1,30})?\s*into\s+(?:an?\s+)?(?:audio|speech|voice|podcast)\b|\b(?:read\s+.*aloud|narrate|speak\s+this|speak\s+out\s+loud|text\s*to\s*speech|tts)\b/i.test(pLower);
+  const isImageIntent = /\b(?:generate|create|make|draw|paint|render|illustrate|produce|design)\s+(?:both\s+)?(?:an?\s+)?(?:image|photo|picture|drawing|illustration|artwork|wallpaper|portrait|graphic|banner|logo|avatar|visual)\b|\b(?:draw\s+me|paint\s+me)\b/i.test(pLower);
+  const asksBoth = (isAudioIntent && isImageIntent) || /\b(?:image\s+and\s+audio|audio\s+and\s+image|both\s+(?:an?\s+)?image\s+and\s+(?:an?\s+)?audio|picture\s+and\s+voice)\b/i.test(pLower);
 
-  const audioOnlyRequested = asksAudio && !asksImage && !asksCodeOrHtml;
-  const imageOnlyRequested = asksImage && !asksAudio;
+  const allowAudio = isAudioIntent || asksBoth;
+  const allowImage = (isImageIntent || asksBoth) && !(!asksBoth && isAudioIntent);
+  const isAudioOnly = allowAudio && !allowImage;
+  const allowHtmlImageDirectives = !isAudioOnly && (allowImage || /\b(?:html|website|webpage|page|app|web\s+app|game)\b/i.test(pLower));
+
+  // Helper with 25s safety timeout to allow complete multi-sentence Kokoro audio synthesis
+  const withTimeout = (promise, ms = 25000) => Promise.race([
+    promise,
+    new Promise(resolve => setTimeout(() => {
+      console.warn(`[AGENTIC WORKSPACE] Media generation operation timed out after ${ms}ms`);
+      resolve(null);
+    }, ms))
+  ]);
 
   // 1. Tag directives: [IMAGE: prompt="..." (, filename="...")]
-  if (!audioOnlyRequested) {
+  if (allowImage) {
     const imgTagRegex = /\[IMAGE:\s*prompt="([^"]+)"(?:\s*,\s*filename="([^"]+)")?\s*\]/gi;
     let imgMatch;
     while ((imgMatch = imgTagRegex.exec(text)) !== null) {
       const imgPrompt = imgMatch[1];
       const filename = imgMatch[2] || `image_${createdMedia.length + 1}.png`;
-      const gen = await executeAutonomousImageGen(imgPrompt, filename, activeWs);
+      const gen = await withTimeout(executeAutonomousImageGen(imgPrompt, filename, activeWs));
       if (gen) createdMedia.push(gen);
     }
 
     // 2. HTML embedded directives: data-generate="..." or data-prompt="..."
-    const htmlImgRegex = /<img\s+[^>]*?(?:src=["'](?:assets\/)?([^"']+)["'][^>]*?)?(?:data-generate|data-prompt)=["']([^"']+)["'][^>]*?>/gi;
-    let htmlMatch;
-    while ((htmlMatch = htmlImgRegex.exec(text)) !== null) {
-      const filename = htmlMatch[1] || `image_${createdMedia.length + 1}.png`;
-      const imgPrompt = htmlMatch[2];
-      if (imgPrompt && !createdMedia.some(m => m.filename === filename)) {
-        const gen = await executeAutonomousImageGen(imgPrompt, filename, activeWs);
-        if (gen) createdMedia.push(gen);
+    if (allowHtmlImageDirectives) {
+      const htmlImgRegex = /<img\s+[^>]*?(?:src=["'](?:assets\/)?([^"']+)["'][^>]*?)?(?:data-generate|data-prompt)=["']([^"']+)["'][^>]*?>/gi;
+      let htmlMatch;
+      while ((htmlMatch = htmlImgRegex.exec(text)) !== null) {
+        const filename = htmlMatch[1] || `image_${createdMedia.length + 1}.png`;
+        const imgPrompt = htmlMatch[2];
+        if (imgPrompt && !createdMedia.some(m => m.filename === filename)) {
+          const gen = await withTimeout(executeAutonomousImageGen(imgPrompt, filename, activeWs));
+          if (gen) createdMedia.push(gen);
+        }
       }
     }
 
@@ -7628,19 +7646,19 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
     const isExplicitImageGenPrompt = /^(?:generate|create|make|draw|paint|render)\s+(?:an?\s+)?(?:image|photo|picture|drawing|illustration|artwork)\s+(?:of\s+)?(.+)/i.exec(pLower);
     if (isExplicitImageGenPrompt && isExplicitImageGenPrompt[1] && createdMedia.length === 0) {
       const explicitPrompt = isExplicitImageGenPrompt[1].trim();
-      const gen = await executeAutonomousImageGen(explicitPrompt, `image_${Date.now()}.png`, activeWs);
+      const gen = await withTimeout(executeAutonomousImageGen(explicitPrompt, `image_${Date.now()}.png`, activeWs));
       if (gen) createdMedia.push(gen);
     }
   }
 
   // 4. Audio tag directives: [AUDIO: text="..." (, filename="...")]
-  if (!imageOnlyRequested) {
+  if (allowAudio) {
     const audioTagRegex = /\[AUDIO:\s*text="([^"]+)"(?:\s*,\s*filename="([^"]+)")?\s*\]/gi;
     let audioMatch;
     while ((audioMatch = audioTagRegex.exec(text)) !== null) {
       const audioText = audioMatch[1];
       const filename = audioMatch[2] || `audio_${createdMedia.length + 1}.wav`;
-      const gen = await executeAutonomousAudioGen(audioText, filename, activeWs);
+      const gen = await withTimeout(executeAutonomousAudioGen(audioText, filename, activeWs));
       if (gen) createdMedia.push(gen);
     }
 
@@ -7649,7 +7667,7 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
     if (isExplicitAudioGenPrompt && createdMedia.filter(m => m.type === 'audio').length === 0) {
       const candidateText = isExplicitAudioGenPrompt[1]?.trim() || text.replace(/```[\s\S]*?```/g, '').slice(0, 500).trim();
       if (candidateText && candidateText.length > 5) {
-        const gen = await executeAutonomousAudioGen(candidateText, `audio_${Date.now()}.wav`, activeWs);
+        const gen = await withTimeout(executeAutonomousAudioGen(candidateText, `audio_${Date.now()}.wav`, activeWs));
         if (gen) createdMedia.push(gen);
       }
     }
@@ -7658,6 +7676,7 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
   // Attach media to createdFiles array so both are accessible
   createdFiles.files = createdFiles;
   createdFiles.media = createdMedia;
+  return createdFiles;
   return createdFiles;
 }
 
@@ -7786,39 +7805,29 @@ async function doLlmChat(req, res, body, retryCount = 0, routedModelInfo = null)
               } catch (_) {}
             }
           }
-          res.write(chunk);
+          // Strip premature [DONE] from raw chunk so browser stream stays open for post-stream workspace files/media
+          let chunkCleaned = chunkStr;
+          if (chunkCleaned.includes("data: [DONE]")) {
+            chunkCleaned = chunkCleaned.replace(/data:\s*\[DONE\](?:\r?\n)*/g, "");
+          }
+          if (chunkCleaned.length > 0) {
+            res.write(chunkCleaned);
+          }
         });
         clientRes.on("end", async () => {
-          if (localResponseAccumulator) {
-            try {
-              const lastPrompt = getLastUserQuery(rawMessages);
-              const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
-              const savedFiles = await autoExtractAndSaveCode(localResponseAccumulator, lastPrompt, activeWs);
-              const savedMedia = savedFiles?.media || [];
-              if (savedFiles && savedFiles.length > 0) {
-                for (const sf of savedFiles) {
-                  let note = `\n\n> Workspace file created: \`${sf.relativePath}\` (${sf.size} bytes) • [Download](/api/files/download?path=${encodeURIComponent(sf.relativePath)})`;
-                  if (sf.isHtml) {
-                    note += ` • [Preview in Browser](action:preview?file=${encodeURIComponent(sf.relativePath)})`;
-                  }
-                  res.write(`data: ${JSON.stringify({
-                    choices: [{ delta: { content: note } }],
-                    text: note,
-                    content: note
-                  })}\n\n`);
-                }
-              }
-              if (savedMedia && savedMedia.length > 0) {
-                for (const m of savedMedia) {
-                  if (m.type === 'image') {
-                    let note = `\n\n![${m.prompt}](${m.url})\n> Photo generated: \`${m.relativePath}\` • [Download](/api/files/download?path=${encodeURIComponent(m.relativePath)})`;
-                    res.write(`data: ${JSON.stringify({
-                      choices: [{ delta: { content: note } }],
-                      text: note,
-                      content: note
-                    })}\n\n`);
-                  } else if (m.type === 'audio') {
-                    let note = `\n\n[AUDIO: src="${m.url}" name="${m.filename}" duration="${Math.round((m.durationMs || 3000)/1000)}s" text="${encodeURIComponent(m.text || '')}"]\n> Audio generated: \`${m.relativePath}\` • [Download](/api/files/download?path=${encodeURIComponent(m.relativePath)})`;
+          try {
+            if (localResponseAccumulator) {
+              try {
+                const lastPrompt = getLastUserQuery(rawMessages);
+                const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
+                const savedFiles = await autoExtractAndSaveCode(localResponseAccumulator, lastPrompt, activeWs);
+                const savedMedia = savedFiles?.media || [];
+                if (savedFiles && savedFiles.length > 0) {
+                  for (const sf of savedFiles) {
+                    let note = `\n\n> Workspace file created: \`${sf.relativePath}\` (${sf.size} bytes) • [Download](/api/files/download?path=${encodeURIComponent(sf.relativePath)})`;
+                    if (sf.isHtml) {
+                      note += ` • [Preview in Browser](action:preview?file=${encodeURIComponent(sf.relativePath)})`;
+                    }
                     res.write(`data: ${JSON.stringify({
                       choices: [{ delta: { content: note } }],
                       text: note,
@@ -7826,26 +7835,49 @@ async function doLlmChat(req, res, body, retryCount = 0, routedModelInfo = null)
                     })}\n\n`);
                   }
                 }
+                if (savedMedia && savedMedia.length > 0) {
+                  for (const m of savedMedia) {
+                    if (m.type === 'image') {
+                      let note = `\n\n![${m.prompt}](${m.url})\n> Photo generated: \`${m.relativePath}\` • [Download](/api/files/download?path=${encodeURIComponent(m.relativePath)})`;
+                      res.write(`data: ${JSON.stringify({
+                        choices: [{ delta: { content: note } }],
+                        text: note,
+                        content: note
+                      })}\n\n`);
+                    } else if (m.type === 'audio') {
+                      let note = `\n\n[AUDIO: src="${m.url}" name="${m.filename}" duration="${Math.round((m.durationMs || 3000)/1000)}s" text="${encodeURIComponent(m.text || '')}"]\n> Audio generated: \`${m.relativePath}\` • [Download](/api/files/download?path=${encodeURIComponent(m.relativePath)})`;
+                      res.write(`data: ${JSON.stringify({
+                        choices: [{ delta: { content: note } }],
+                        text: note,
+                        content: note
+                      })}\n\n`);
+                    }
+                  }
+                }
+              } catch (saveErr) {
+                console.warn("[AGENTIC WORKSPACE] Post-save error:", saveErr.message);
               }
-            } catch (saveErr) {
-              console.warn("[AGENTIC WORKSPACE] Post-save error:", saveErr.message);
+            }
+            if (db && db.recordAiUsageEvent) {
+              try {
+                db.recordAiUsageEvent("prof_default", {
+                  providerId: "local",
+                  model: llmSettings?.model || "local-model",
+                  promptTokens: 0,
+                  completionTokens: localTokenEstimate,
+                  totalTokens: localTokenEstimate,
+                  costUsd: 0,
+                  durationMs: 0,
+                  requestType: "chat"
+                });
+              } catch (_) {}
+            }
+          } finally {
+            if (!res.writableEnded) {
+              res.write("data: [DONE]\n\n");
+              res.end();
             }
           }
-          if (db && db.recordAiUsageEvent) {
-            try {
-              db.recordAiUsageEvent("prof_default", {
-                providerId: "local",
-                model: llmSettings?.model || "local-model",
-                promptTokens: 0,
-                completionTokens: localTokenEstimate,
-                totalTokens: localTokenEstimate,
-                costUsd: 0,
-                durationMs: 0,
-                requestType: "chat"
-              });
-            } catch (_) {}
-          }
-          res.end();
         });
         clientRes.on("error", (err) => res.destroy(err));
       });
@@ -8130,21 +8162,58 @@ async function getLlmfitRecommendations(useCase = "chat", limit = 10) {
     const wsTargetDir = (activeWs && activeWs.path) ? activeWs.path : path.join(__dirname, "..", "..", "app", "workspace", "abyx");
     const isWsAvailable = fs.existsSync(wsTargetDir);
 
-    // Extract last user prompt to ground relevant craftsmanship skills
+    // Extract last user prompt to ground relevant craftsmanship skills and dynamic media directives
     const lastUserPrompt = [...normalizedMessages].reverse().find(m => m.role === 'user')?.content || "";
+    const lastPromptLower = lastUserPrompt.toLowerCase();
+
+    // High-precision intent classification to save prompt tokens and eliminate hallucinated cross-media
+    const isAudioIntent = /\b(?:generate|create|make|produce|synthesize|record|convert|turn)\s+(?:both\s+)?(?:an?\s+)?(?:audio|speech|voice|podcast|voiceover|narration|sound\s+clip|recording|spoken\s+word)\b|\b(?:convert|turn)\s+(?:[\w\s]{1,30})?\s*into\s+(?:an?\s+)?(?:audio|speech|voice|podcast)\b|\b(?:read\s+.*aloud|narrate|speak\s+this|speak\s+out\s+loud|text\s*to\s*speech|tts)\b/i.test(lastPromptLower);
+    const isImageIntent = /\b(?:generate|create|make|draw|paint|render|illustrate|produce|design)\s+(?:both\s+)?(?:an?\s+)?(?:image|photo|picture|drawing|illustration|artwork|wallpaper|portrait|graphic|banner|logo|avatar|visual)\b|\b(?:draw\s+me|paint\s+me)\b/i.test(lastPromptLower);
+    const asksBoth = (isAudioIntent && isImageIntent) || /\b(?:image\s+and\s+audio|audio\s+and\s+image|both\s+(?:an?\s+)?image\s+and\s+(?:an?\s+)?audio|picture\s+and\s+voice)\b/i.test(lastPromptLower);
+    const asksWebOrApp = /\b(?:html|website|webpage|page|app|web\s+app|game)\b/i.test(lastPromptLower);
+
     let skillsContext = "";
-    if (abyxSkills) {
+    // Only consult skills when user asks for development/technical assistance (saves ~1,500 prompt tokens on general chat)
+    const isTechnicalQuery = /\b(?:code|write|build|create|fix|debug|refactor|function|script|css|html|react|python|sql|test|api|security|docker|git|database|algorithm|architecture)\b/i.test(lastPromptLower);
+    if (abyxSkills && isTechnicalQuery) {
       try {
         const matchedSkills = abyxSkills.findRelevantSkills(lastUserPrompt);
         if (matchedSkills && matchedSkills.length > 0) {
-          skillsContext = `\n\n# ACTIVE AGENTIC CRAFTSMANSHIP SKILLS (PROFESSIONAL STANDARDS):\n`;
-          for (const s of matchedSkills) {
-            skillsContext += `### Skill: ${s.name} (${s.id})\n${s.content.slice(0, 1500)}\n\n`;
+          skillsContext = `\n\n# ACTIVE CRAFTSMANSHIP SKILLS:\n`;
+          for (const s of matchedSkills.slice(0, 2)) {
+            skillsContext += `### ${s.name}\n${s.content.slice(0, 500)}\n\n`;
           }
         }
       } catch (e) {
         console.warn("[SKILLS] Prompt consultation warning:", e.message);
       }
+    }
+
+    let dynamicMediaInstruction = "";
+    if (isAudioIntent && !asksBoth) {
+      dynamicMediaInstruction = `
+4. AUTONOMOUS AUDIO SYNTHESIS:
+   - When the user asks for audio or speech, emit ONLY the single directive on its own line:
+     [AUDIO: text="the text to speak clearly and naturally", filename="summary.wav"]
+   - The Kokoro speech model autonomously synthesizes speech and saves it into "${wsTargetDir}/audio/".
+   - CRITICAL MANDATE: The user asked for audio ONLY. Never emit [IMAGE: ...] or any image tags.`;
+    } else if (isImageIntent && !asksBoth) {
+      dynamicMediaInstruction = `
+4. AUTONOMOUS PHOTO GENERATION:
+   - When the user asks for an image or picture, emit ONLY the single directive on its own line:
+     [IMAGE: prompt="detailed description of the visual scene", filename="hero.png"]
+   - The Abyx photo engine autonomously generates high-resolution PNGs into "${wsTargetDir}/assets/".
+   - CRITICAL MANDATE: The user asked for an image ONLY. Never emit [AUDIO: ...] or speech directives.`;
+    } else if (asksBoth) {
+      dynamicMediaInstruction = `
+4. MULTI-MEDIA COLLABORATION (PHOTO & AUDIO):
+   - Photo directive: [IMAGE: prompt="detailed description", filename="hero.png"]
+   - Audio directive: [AUDIO: text="spoken text", filename="summary.wav"]`;
+    } else if (asksWebOrApp) {
+      dynamicMediaInstruction = `
+4. EMBEDDED MEDIA IN WEB APPS:
+   - When building an HTML website or web app, embed visual directives inside HTML img elements:
+     <img src="assets/hero.png" data-generate="detailed description of the visual scene" alt="Hero" />`;
     }
 
     const wsInstruction = `\n\n# IDENTITY & AGENT HARNESS CONTEXT:
@@ -8167,38 +8236,16 @@ CORE OPERATIONAL RULES:
    - When asked to build an application, website, script, or tool, you have direct autonomous access to create, modify, and manage files and folders in "${wsTargetDir}".
    - CRITICAL FORMATTING MANDATE: You MUST ALWAYS enclose any website, application, HTML, CSS, JavaScript, Python, or shell code within standard markdown triple-backtick code fences (\`\`\`html ... \`\`\`, \`\`\`javascript ... \`\`\`, \`\`\`python ... \`\`\`).
    - NEVER output raw HTML or code directly into the chat without triple-backtick code fences.
-   - CRITICAL NAMING MANDATE: Always name the file meaningfully and descriptively based on what the user is requesting (for example: <!-- path: coffee_shop.html -->, <!-- path: portfolio.html -->, <!-- path: snake_game.html -->, <!-- path: abyx_profile.html -->, <!-- path: calculator.html -->). NEVER default to "index.html" unless the user explicitly requested "index.html". This ensures that each user request produces its own unique file and never overwrites previously created websites or applications.
+   - CRITICAL NAMING MANDATE: Always name the file meaningfully and descriptively based on what the user is requesting (for example: <!-- path: coffee_shop.html -->, <!-- path: portfolio.html -->, <!-- path: snake_game.html -->, <!-- path: abyx_profile.html -->, <!-- path: calculator.html -->). NEVER default to "index.html" unless the user explicitly requested "index.html".
    - On the very first line INSIDE the code block, always include the relative path comment matching the specific topic, for example:
 \`\`\`html
 <!-- path: coffee_shop.html -->
 <!DOCTYPE html>
 ...
 \`\`\`
-or for scripts/components:
-\`\`\`javascript
-// path: calculator.js
-...
-\`\`\`
    - Make each web app or website complete, self-contained, functional, interactive, and beautifully styled with embedded CSS and JS.
    - Always write complete, production-grade code. Never use lazy placeholders like "// TODO" or "// ...existing code".
-   - Never tell the user to manually copy-paste or save files by hand. Everything is handled directly in the workspace.
-
-4. AUTONOMOUS MULTI-MODEL COLLABORATION (PHOTO & AUDIO ENGINES):
-   STRICT REQUEST SPECIFICITY:
-   - When the user asks for audio or speech ONLY (e.g. "generate an audio", "voice", "podcast", "narrate", "read this", "speak"), emit ONLY [AUDIO: ...] and NEVER emit [IMAGE: ...] or any image directives.
-   - When the user asks for an image or picture ONLY (e.g. "generate an image", "picture", "photo", "drawing"), emit ONLY [IMAGE: ...] and NEVER emit [AUDIO: ...] or any audio directives.
-   - ONLY produce what was explicitly requested by the user. NEVER volunteer or bundle unrequested media types together unless explicitly asked for both.
-   - Photo & Image Generation:
-     * When the user asks to generate an image or picture, output ONLY the single directive on its own line:
-       [IMAGE: prompt="detailed description of the visual scene", filename="hero.png"]
-       CRITICAL: Never output HTML <img> tags, never output "<!-- path: ... -->" comments, and never output code blocks when generating standalone images.
-     * When building an HTML website or web app, embed visual directives inside HTML img elements:
-       <img src="assets/hero.png" data-generate="detailed description of the visual scene" alt="Hero" />
-     The Abyx photo generation engine autonomously generates real high-resolution PNGs and saves them directly into "${wsTargetDir}/assets/".
-   - Audio & Speech Synthesis:
-     When the user asks to turn text, info, summaries, or narratives into speech/audio, emit:
-     [AUDIO: text="the text to speak clearly and naturally", filename="summary.wav"]
-     The Kokoro speech model autonomously synthesizes high-fidelity speech and saves it directly into "${wsTargetDir}/audio/".
+   - Never tell the user to manually copy-paste or save files by hand. Everything is handled directly in the workspace.${dynamicMediaInstruction}
 ${skillsContext}`;
       
     const sysIdx = normalizedMessages.findIndex(m => m.role === 'system');

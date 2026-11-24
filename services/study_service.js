@@ -41,7 +41,7 @@ class StudyService {
       profileId,
       title: data.title || 'Untitled Studybook',
       description: data.description || '',
-      emoji: data.emoji || '📘',
+      emoji: data.emoji || '',
       metadata: data.metadata || {}
     });
   }

@@ -88,3 +88,6 @@ __pycache__/
 ._*
 Thumbs.db
 desktop.ini
+
+.backup_optimization/
+

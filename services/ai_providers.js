@@ -233,7 +233,7 @@ function getProviderStatusList(profileId = 'prof_default') {
     const provObj = {
       id: pId,
       name: meta.name,
-      flag: meta.flag || '🌐',
+      flag: meta.flag || '',
       country: meta.country || '',
       tierType: meta.tierType || (meta.keyless ? 'free' : 'freemium'),
       author: meta.author || 'General',
@@ -270,7 +270,7 @@ function getProviderStatusList(profileId = 'prof_default') {
         author: m.author || meta.author || 'General',
         providerId: pId,
         providerName: meta.name,
-        flag: meta.flag || '🌐',
+        flag: meta.flag || '',
         tier: m.tier || meta.tierType || 'free',
         pricing: m.pricing || null,
         contextWindow: m.contextWindow || '128,000',

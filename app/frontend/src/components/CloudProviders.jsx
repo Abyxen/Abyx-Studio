@@ -344,7 +344,7 @@ export default function CloudProviders({ showAlert, showConfirm, setActiveTab, o
               <div className="abyx-provider-top">
                 <div className="abyx-provider-identity">
                   <div className="abyx-provider-name">
-                    <span>{provider.flag || "🌐"}</span>
+                    <Globe size={16} style={{ color: "var(--md-sys-color-primary, #a8c7fa)", flexShrink: 0 }} />
                     <span>{provider.name}</span>
                   </div>
                   <span className="abyx-provider-desc">{provider.description || provider.tagline}</span>

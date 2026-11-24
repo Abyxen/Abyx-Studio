@@ -59,7 +59,6 @@ export default function StudybooksManager() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
-  const [newEmoji, setNewEmoji] = useState("📘");
 
   const [addSourceModalOpen, setAddSourceModalOpen] = useState(false);
   const [sourceType, setSourceType] = useState("text"); // 'text', 'url', 'file'
@@ -137,8 +136,7 @@ export default function StudybooksManager() {
     try {
       const res = await createStudybook({
         title: newTitle.trim(),
-        description: newDesc.trim(),
-        emoji: newEmoji || "📘"
+        description: newDesc.trim()
       });
       if (res?.ok && res.studybook) {
         setStudybooks(prev => [res.studybook, ...prev]);
@@ -335,7 +333,7 @@ export default function StudybooksManager() {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
-                    <span style={{ fontSize: "1.1rem" }}>{sb.emoji || "📘"}</span>
+                    <BookOpen size={16} style={{ color: sb.id === activeStudybookId ? "var(--accent-color, #ff6a3d)" : "var(--md-sys-color-primary, #a8c7fa)", flexShrink: 0 }} />
                     <span style={{ fontSize: "0.88rem", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {sb.title}
                     </span>
@@ -883,15 +881,6 @@ export default function StudybooksManager() {
                   value={newDesc}
                   onChange={(e) => setNewDesc(e.target.value)}
                   style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid var(--border-color, #444)", backgroundColor: "var(--md-sys-color-background)", color: "inherit" }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: "0.85rem", fontWeight: 600, display: "block", marginBottom: 6 }}>Icon / Emoji</label>
-                <input
-                  type="text"
-                  value={newEmoji}
-                  onChange={(e) => setNewEmoji(e.target.value)}
-                  style={{ width: 60, padding: "8px 12px", textAlign: "center", borderRadius: 6, border: "1px solid var(--border-color, #444)", backgroundColor: "var(--md-sys-color-background)", color: "inherit" }}
                 />
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>

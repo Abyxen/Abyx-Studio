@@ -4,7 +4,7 @@ import {
   Lightbulb, Zap, FileText, ArrowUp, Brain, Mic, AudioLines, Image as ImageIcon,
   PanelLeft, Volume2, RotateCcw, ThumbsUp, ThumbsDown, Copy, Check, Pin,
   Download, Sparkles, RefreshCw, FolderKanban, FileCode, Eye, ExternalLink,
-  Folder, Code2, Terminal, CheckCircle, Circle, Play, Pause
+  Folder, Code2, Terminal, CheckCircle, Circle, Play, Pause, Settings, GitBranch, Layers, Clock
 } from "lucide-react";
 import {
   getBackendStatus,
@@ -668,6 +668,42 @@ function TextChat({
     return Math.max(wordCount, Math.ceil(value.length / 4));
   };
 
+  // Pi-inspired sliding window context compaction to prevent OOM and reduce latency on long sessions
+  const compactConversationMessages = (msgs, maxEstimatedTokens = 12000) => {
+    if (!Array.isArray(msgs) || msgs.length <= 8) return msgs;
+    let totalTokens = 0;
+    for (const m of msgs) {
+      const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content || "");
+      totalTokens += estimateTokens(text);
+    }
+    if (totalTokens <= maxEstimatedTokens) return msgs;
+
+    const recentCount = 6;
+    const recentMessages = msgs.slice(-recentCount);
+    const olderMessages = msgs.slice(0, -recentCount);
+
+    const summaryPoints = [];
+    for (let i = 0; i < olderMessages.length; i += 2) {
+      const uMsg = olderMessages[i];
+      const aMsg = olderMessages[i + 1];
+      const uText = (typeof uMsg?.content === "string" ? uMsg.content : "").slice(0, 120).trim();
+      const aText = (typeof aMsg?.content === "string" ? aMsg.content : "").replace(/```[\s\S]*?```/g, "[code]").slice(0, 150).trim();
+      if (uText) {
+        summaryPoints.push(`- User: "${uText}" -> Abyx: "${aText}"`);
+      }
+    }
+
+    const compactedAnchor = {
+      role: "user",
+      content: `[PRIOR CONVERSATION CONTEXT (${olderMessages.length} earlier turns compacted for performance):\n${summaryPoints.slice(-8).join("\n")}\n]`
+    };
+    const ackAnchor = {
+      role: "assistant",
+      content: "Understood. I retain full context of our earlier discussion."
+    };
+    return [compactedAnchor, ackAnchor, ...recentMessages];
+  };
+
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
   const getAutoMaxResponseTokens = (promptTokens, thinkingEnabled) => {
@@ -1191,7 +1227,7 @@ function TextChat({
       ].filter(Boolean).join("\n\n");
       const requestMessages = [
         ...(combinedSystemPrompt ? [{ role: "system", content: combinedSystemPrompt }] : []),
-        ...requestConversationMessages,
+        ...compactConversationMessages(requestConversationMessages),
       ];
       const promptTokenEstimate = requestMessages.reduce((sum, message) => {
         const messageText = Array.isArray(message.content)
@@ -1400,6 +1436,23 @@ function TextChat({
       setTimeout(() => {
         followGenerationRef.current = false;
       }, 250);
+      // Hard guarantee: finalize assistant message status so UI never stays stuck in 'Thinking...' or 'Working on...'
+      setMessages((prev) => {
+        if (!prev || prev.length === 0) return prev;
+        const last = prev[prev.length - 1];
+        if (last && last.role === "assistant" && last.generationStats && last.generationStats.status !== "complete") {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            ...last,
+            generationStats: {
+              ...last.generationStats,
+              status: "complete"
+            }
+          };
+          return updated;
+        }
+        return prev;
+      });
     }
   };
 
@@ -1420,6 +1473,20 @@ function TextChat({
       setCopiedMessageIdx(index);
       setTimeout(() => setCopiedMessageIdx(null), 2000);
     }
+  };
+
+  const handleForkConversation = (fromIndex) => {
+    if (isBusy || !messages || messages.length === 0) return;
+    const slicedMessages = messages.slice(0, fromIndex + 1);
+    const currentConv = conversations.find(c => c.id === activeConversationId);
+    const baseTitle = currentConv?.title || "Conversation";
+    const newId = `chat_${Date.now()}_fork`;
+    const newTitle = `${baseTitle} (Branch)`;
+    
+    saveConversationState?.(newId, slicedMessages, selectedModel, newTitle);
+    setActiveConversationId?.(newId);
+    setMessages(slicedMessages);
+    if (showAlert) showAlert("success", "Conversation Branched", `Branched ${slicedMessages.length} messages into a new thread.`);
   };
 
   const fallbackBrowserSpeech = (cleanText, index) => {
@@ -1558,7 +1625,7 @@ function TextChat({
       const systemPrompt = textSettings?.systemPrompt || "You are a helpful local AI assistant.";
       const requestMessages = [
         ...(systemPrompt ? [{ role: "system", content: systemPrompt.trim() }] : []),
-        ...priorMessages,
+        ...compactConversationMessages(priorMessages),
       ];
       let assistantText = "";
       let rawAssistantText = "";
@@ -2060,7 +2127,7 @@ function TextChat({
                               {configuredProviders.map((p) => (
                                 <div key={p.id} style={{ margin: "4px 0" }}>
                                   <div style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.6)", padding: "4px 8px" }}>
-                                    {p.flag} {p.name}
+                                    <Globe size={12} style={{ color: "var(--md-sys-color-primary, #a8c7fa)", flexShrink: 0 }} /> <span>{p.name}</span>
                                   </div>
                                   {(p.modelObjects || p.models || []).slice(0, 5).map((m) => {
                                     const modelId = typeof m === "string" ? `${p.id}/${m}` : (m.id || `${p.id}/${m.rawId}`);
@@ -2124,7 +2191,8 @@ function TextChat({
                                     cursor: "pointer"
                                   }}
                                 >
-                                  <span>⚙️ Configure Cloud Providers</span>
+                                  <Settings size={13} style={{ marginRight: 6 }} />
+                                  <span>Configure Cloud Providers</span>
                                 </button>
                               )}
                             </div>
@@ -2367,21 +2435,38 @@ function TextChat({
                   )}
                 </div>
 
-                <div
-                  className="chat-context"
-                  title={`Context used: ${contextUsed} / ${contextMax} tokens`}
-                  aria-label={`Context used: ${contextPercent}%`}
-                >
-                  <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
-                    <circle cx="10" cy="10" r="8" stroke="var(--border-color)" strokeWidth="2.5" fill="none" />
-                    <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="2.5" fill="none"
-                      strokeDasharray={2 * Math.PI * 8}
-                      strokeDashoffset={2 * Math.PI * 8 * (1 - contextPercent / 100)}
-                      strokeLinecap="round" transform="rotate(-90 10 10)"
-                    />
-                  </svg>
-                  <span>{contextPercent}%</span>
-                </div>
+                {(() => {
+                  const strokeColor = contextPercent > 85 ? "#ef4444" : contextPercent > 70 ? "#f59e0b" : "var(--md-sys-color-primary, #38bdf8)";
+                  return (
+                    <div
+                      className="chat-context"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        padding: "3px 8px",
+                        borderRadius: "12px",
+                        background: "rgba(255, 255, 255, 0.04)",
+                        border: "1px solid rgba(255, 255, 255, 0.08)",
+                        cursor: "default"
+                      }}
+                      title={`Context Window: ${contextUsed.toLocaleString()} / ${contextMax.toLocaleString()} tokens (${contextPercent}% used)`}
+                      aria-label={`Context used: ${contextPercent}%`}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true">
+                        <circle cx="10" cy="10" r="8" stroke="rgba(255,255,255,0.12)" strokeWidth="2.5" fill="none" />
+                        <circle cx="10" cy="10" r="8" stroke={strokeColor} strokeWidth="2.5" fill="none"
+                          strokeDasharray={2 * Math.PI * 8}
+                          strokeDashoffset={2 * Math.PI * 8 * (1 - contextPercent / 100)}
+                          strokeLinecap="round" transform="rotate(-90 10 10)"
+                        />
+                      </svg>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: strokeColor, fontFamily: "'JetBrains Mono', monospace" }}>
+                        {contextPercent}%
+                      </span>
+                    </div>
+                  );
+                })()}
                 <button type="button" className="chat-thread-btn" onClick={handleClearChat} aria-label="Clear this chat" title="Clear this chat">
                   <Trash2 size={16} />
                 </button>
@@ -2446,6 +2531,17 @@ function TextChat({
                             ABYX
                           </div>
                         )}
+                        {message.role === "assistant" && (displayReasoning || (!isComplete && isBusy && index === messages.length - 1)) && (
+                          <ChatThinkingSection
+                            reasoning={displayReasoning}
+                            timeElapsed={message.generationStats?.seconds || 0}
+                            isComplete={isComplete}
+                            hasWeb={message.generationStats?.web || false}
+                            sources={message.webSources || []}
+                            content={rawContent}
+                            generationStats={message.generationStats}
+                          />
+                        )}
                         {(hasVisibleContent || message.error) && (
                           <div className={`chat-bubble ${message.error ? "error" : ""}`}>
                             {Array.isArray(displayContent) ? (
@@ -2495,8 +2591,9 @@ function TextChat({
                               ) : (
                                 <>
                                   {message.routedModel && (
-                                    <span style={{ color: "#38bdf8", fontWeight: "600", marginRight: "4px" }}>
-                                      ✨ {message.routedModel.selectedModelName || message.routedModel.selectedModel} ({message.routedModel.providerName || "Cloud"}) ·
+                                    <span style={{ display: "inline-flex", alignItems: "center", color: "#38bdf8", fontWeight: "600", marginRight: "6px" }}>
+                                      <Sparkles size={12} style={{ marginRight: 4, flexShrink: 0 }} />
+                                      {message.routedModel.selectedModelName || message.routedModel.selectedModel} ({message.routedModel.providerName || "Cloud"}) ·
                                     </span>
                                   )}
                                   {(message.model || message.generationStats.model || status.settings?.model || "AbyxV2 9B").replace(/\.gguf$/i, "")} · {formatGenerationTime(message.generationStats.seconds)} · {message.generationStats.tokens} tokens
@@ -2531,6 +2628,15 @@ function TextChat({
                               <button
                                 type="button"
                                 className="chat-msg-action-btn"
+                                onClick={() => handleForkConversation(index)}
+                                title="Branch into a new conversation from here"
+                              >
+                                <GitBranch size={13} />
+                                <span>Branch</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="chat-msg-action-btn"
                                 onClick={() => handleDeleteMessage(index)}
                                 title="Delete message"
                               >
@@ -2547,6 +2653,15 @@ function TextChat({
                               >
                                 {copiedMessageIdx === index ? <Check size={13} style={{ color: "var(--md-sys-color-primary)" }} /> : <Copy size={13} />}
                                 <span>{copiedMessageIdx === index ? "Copied" : "Copy"}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="chat-msg-action-btn"
+                                onClick={() => handleForkConversation(index)}
+                                title="Branch into a new conversation from here"
+                              >
+                                <GitBranch size={13} />
+                                <span>Branch</span>
                               </button>
                               <button
                                 type="button"
@@ -2729,7 +2844,7 @@ function parseInlineMarkdown(text) {
               }}
               title={`Preview ${targetFile} in built-in browser`}
             >
-              <span>🌐</span>
+              <Globe size={12} style={{ flexShrink: 0 }} />
               <span>{match[1]}</span>
             </button>
           );
@@ -3295,12 +3410,12 @@ export function ImageBlockRenderer({ src, alt, filename }) {
 
   return (
     <div className="abyx-file-card-wrapper" style={{
-      margin: "10px 0",
-      borderRadius: "12px",
+      margin: "8px 0",
+      borderRadius: "14px",
       border: "1px solid rgba(255, 255, 255, 0.08)",
-      background: "#101014",
+      background: "#111215",
       overflow: "hidden",
-      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.2)",
+      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.25)",
       width: "100%",
       maxWidth: "760px"
     }}>
@@ -3308,7 +3423,7 @@ export function ImageBlockRenderer({ src, alt, filename }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "10px 14px",
+        padding: "10px 16px",
         gap: "12px",
         flexWrap: "wrap"
       }}>
@@ -3318,9 +3433,9 @@ export function ImageBlockRenderer({ src, alt, filename }) {
           <div 
             onClick={() => setShowFull(!showFull)}
             style={{
-              width: "36px",
-              height: "36px",
-              borderRadius: "8px",
+              width: "38px",
+              height: "38px",
+              borderRadius: "10px",
               background: "rgba(56, 189, 248, 0.08)",
               border: "1px solid rgba(56, 189, 248, 0.2)",
               display: "flex",
@@ -3374,32 +3489,27 @@ export function ImageBlockRenderer({ src, alt, filename }) {
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              height: "30px",
-              padding: "0 12px",
-              borderRadius: "7px",
-              background: downloaded ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.08)",
-              color: downloaded ? "#4ade80" : "#f3f4f6",
+              height: "32px",
+              padding: "0 16px",
+              borderRadius: "9999px",
+              background: downloaded ? "#4ade80" : "#ffffff",
+              color: downloaded ? "#052e16" : "#0f172a",
               fontSize: "12px",
-              fontWeight: "500",
-              border: downloaded ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.12)",
+              fontWeight: "600",
+              border: "none",
               cursor: "pointer",
-              transition: "all 0.15s ease"
+              transition: "all 0.15s ease",
+              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.2)"
             }}
             title="Download Image"
             onMouseEnter={(e) => {
-              if (!downloaded) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.13)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
-              }
+              if (!downloaded) e.currentTarget.style.background = "#e2e8f0";
             }}
             onMouseLeave={(e) => {
-              if (!downloaded) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
-              }
+              if (!downloaded) e.currentTarget.style.background = "#ffffff";
             }}
           >
-            {downloaded ? <Check size={13} strokeWidth={2.4} /> : <Download size={13} strokeWidth={2} />}
+            {downloaded ? <Check size={13} strokeWidth={2.6} /> : <Download size={13} strokeWidth={2.4} />}
             <span>{downloaded ? "Saved" : "Download"}</span>
           </button>
 
@@ -3411,30 +3521,28 @@ export function ImageBlockRenderer({ src, alt, filename }) {
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              height: "30px",
-              padding: "0 12px",
-              borderRadius: "7px",
-              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.03)",
-              color: revealed ? "#4ade80" : "rgba(255, 255, 255, 0.75)",
+              height: "32px",
+              padding: "0 14px",
+              borderRadius: "9999px",
+              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.06)",
+              color: revealed ? "#4ade80" : "#f1f5f9",
               fontSize: "12px",
               fontWeight: "500",
-              border: revealed ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.08)",
+              border: revealed ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.12)",
               cursor: revealing ? "wait" : "pointer",
               transition: "all 0.15s ease"
             }}
             title="Reveal in Windows Explorer"
             onMouseEnter={(e) => {
               if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
-                e.currentTarget.style.color = "#f3f4f6";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.16)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.12)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
               }
             }}
             onMouseLeave={(e) => {
               if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
-                e.currentTarget.style.color = "rgba(255, 255, 255, 0.75)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.06)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
               }
             }}
           >
@@ -3449,30 +3557,30 @@ export function ImageBlockRenderer({ src, alt, filename }) {
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
-              width: "30px",
-              height: "30px",
-              borderRadius: "7px",
-              background: showFull ? "rgba(56, 189, 248, 0.12)" : "rgba(255, 255, 255, 0.03)",
-              color: showFull ? "#38bdf8" : "rgba(255, 255, 255, 0.75)",
-              border: showFull ? "1px solid rgba(56, 189, 248, 0.28)" : "1px solid rgba(255, 255, 255, 0.08)",
+              width: "32px",
+              height: "32px",
+              borderRadius: "9999px",
+              background: showFull ? "rgba(56, 189, 248, 0.15)" : "rgba(255, 255, 255, 0.06)",
+              color: showFull ? "#38bdf8" : "#f1f5f9",
+              border: showFull ? "1px solid rgba(56, 189, 248, 0.3)" : "1px solid rgba(255, 255, 255, 0.12)",
               cursor: "pointer",
               transition: "all 0.15s ease"
             }}
             title={showFull ? "Collapse preview" : "View preview"}
             onMouseEnter={(e) => {
               if (!showFull) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
-                e.currentTarget.style.color = "#f3f4f6";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.12)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
               }
             }}
             onMouseLeave={(e) => {
               if (!showFull) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
-                e.currentTarget.style.color = "rgba(255, 255, 255, 0.75)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.06)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
               }
             }}
           >
-            <Eye size={13} strokeWidth={2} />
+            <Eye size={14} strokeWidth={2} />
           </button>
         </div>
       </div>
@@ -3610,12 +3718,12 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
 
   return (
     <div className="abyx-file-card-wrapper" style={{
-      margin: "10px 0",
-      borderRadius: "12px",
+      margin: "8px 0",
+      borderRadius: "14px",
       border: "1px solid rgba(255, 255, 255, 0.08)",
-      background: "#101014",
+      background: "#111215",
       overflow: "hidden",
-      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.2)",
+      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.25)",
       width: "100%",
       maxWidth: "760px"
     }}>
@@ -3623,7 +3731,7 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "10px 14px",
+        padding: "10px 16px",
         gap: "12px",
         flexWrap: "wrap"
       }}>
@@ -3633,12 +3741,12 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
             type="button"
             onClick={togglePlay}
             style={{
-              width: "36px",
-              height: "36px",
-              borderRadius: "8px",
-              background: isPlaying ? "rgba(69, 212, 131, 0.18)" : "rgba(69, 212, 131, 0.08)",
-              color: "#45D483",
-              border: isPlaying ? "1px solid rgba(69, 212, 131, 0.45)" : "1px solid rgba(69, 212, 131, 0.22)",
+              width: "38px",
+              height: "38px",
+              borderRadius: "50%",
+              background: isPlaying ? "rgba(34, 197, 94, 0.22)" : "rgba(34, 197, 94, 0.1)",
+              color: "#22c55e",
+              border: isPlaying ? "1px solid rgba(34, 197, 94, 0.45)" : "1px solid rgba(34, 197, 94, 0.22)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -3648,10 +3756,10 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
             }}
             title={isPlaying ? "Pause" : "Play Kokoro Audio"}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = isPlaying ? "rgba(69, 212, 131, 0.26)" : "rgba(69, 212, 131, 0.16)";
+              e.currentTarget.style.background = isPlaying ? "rgba(34, 197, 94, 0.3)" : "rgba(34, 197, 94, 0.18)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = isPlaying ? "rgba(69, 212, 131, 0.18)" : "rgba(69, 212, 131, 0.08)";
+              e.currentTarget.style.background = isPlaying ? "rgba(34, 197, 94, 0.22)" : "rgba(34, 197, 94, 0.1)";
             }}
           >
             {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" style={{ marginLeft: "2px" }} />}
@@ -3695,7 +3803,7 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
                 <div style={{
                   width: `${Math.round(progress * 100)}%`,
                   height: "100%",
-                  background: "#45D483",
+                  background: "#22c55e",
                   transition: "width 0.1s linear"
                 }} />
               </div>
@@ -3712,32 +3820,27 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              height: "30px",
-              padding: "0 12px",
-              borderRadius: "7px",
-              background: downloaded ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.08)",
-              color: downloaded ? "#4ade80" : "#f3f4f6",
+              height: "32px",
+              padding: "0 16px",
+              borderRadius: "9999px",
+              background: downloaded ? "#4ade80" : "#ffffff",
+              color: downloaded ? "#052e16" : "#0f172a",
               fontSize: "12px",
-              fontWeight: "500",
-              border: downloaded ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.12)",
+              fontWeight: "600",
+              border: "none",
               cursor: "pointer",
-              transition: "all 0.15s ease"
+              transition: "all 0.15s ease",
+              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.2)"
             }}
             title="Download Audio WAV"
             onMouseEnter={(e) => {
-              if (!downloaded) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.13)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
-              }
+              if (!downloaded) e.currentTarget.style.background = "#e2e8f0";
             }}
             onMouseLeave={(e) => {
-              if (!downloaded) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
-              }
+              if (!downloaded) e.currentTarget.style.background = "#ffffff";
             }}
           >
-            {downloaded ? <Check size={13} strokeWidth={2.4} /> : <Download size={13} strokeWidth={2} />}
+            {downloaded ? <Check size={13} strokeWidth={2.6} /> : <Download size={13} strokeWidth={2.4} />}
             <span>{downloaded ? "Saved" : "Download"}</span>
           </button>
 
@@ -3749,30 +3852,28 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              height: "30px",
-              padding: "0 12px",
-              borderRadius: "7px",
-              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.03)",
-              color: revealed ? "#4ade80" : "rgba(255, 255, 255, 0.75)",
+              height: "32px",
+              padding: "0 14px",
+              borderRadius: "9999px",
+              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.06)",
+              color: revealed ? "#4ade80" : "#f1f5f9",
               fontSize: "12px",
               fontWeight: "500",
-              border: revealed ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.08)",
+              border: revealed ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.12)",
               cursor: revealing ? "wait" : "pointer",
               transition: "all 0.15s ease"
             }}
             title="Reveal in Windows Explorer"
             onMouseEnter={(e) => {
               if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
-                e.currentTarget.style.color = "#f3f4f6";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.16)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.12)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
               }
             }}
             onMouseLeave={(e) => {
               if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
-                e.currentTarget.style.color = "rgba(255, 255, 255, 0.75)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.06)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
               }
             }}
           >
@@ -3833,11 +3934,12 @@ export function MarkdownRenderer({ content, onOpenBrowser, isComplete = true, us
   if (typeof content !== 'string') return null;
 
   const pLower = (userPrompt || "").toLowerCase();
-  const asksAudio = /\b(audio|speech|voice|podcast|read\s+aloud|narrat\w*|speak|sound|wav|mp3|say)\b/i.test(pLower);
-  const asksImage = /\b(image|picture|photo|illustration|drawing|artwork|visual|wallpaper|render\s+an?\s+image|png|jpg)\b/i.test(pLower);
-  const asksAppOrCode = /\b(html|website|webpage|page|app|code|script|css|game)\b/i.test(pLower);
-  const audioOnly = asksAudio && !asksImage && !asksAppOrCode;
-  const imageOnly = asksImage && !asksAudio;
+  const isAudioIntent = /\b(?:generate|create|make|produce|synthesize|record|convert|turn)\s+(?:both\s+)?(?:an?\s+)?(?:audio|speech|voice|podcast|voiceover|narration|sound\s+clip|recording|spoken\s+word)\b|\b(?:convert|turn)\s+(?:[\w\s]{1,30})?\s*into\s+(?:an?\s+)?(?:audio|speech|voice|podcast)\b|\b(?:read\s+.*aloud|narrate|speak\s+this|speak\s+out\s+loud|text\s*to\s*speech|tts)\b/i.test(pLower);
+  const isImageIntent = /\b(?:generate|create|make|draw|paint|render|illustrate|produce|design)\s+(?:both\s+)?(?:an?\s+)?(?:image|photo|picture|drawing|illustration|artwork|wallpaper|portrait|graphic|banner|logo|avatar|visual)\b|\b(?:draw\s+me|paint\s+me)\b/i.test(pLower);
+  const asksBoth = (isAudioIntent && isImageIntent) || /\b(?:image\s+and\s+audio|audio\s+and\s+image|both\s+(?:an?\s+)?image\s+and\s+(?:an?\s+)?audio|picture\s+and\s+voice)\b/i.test(pLower);
+
+  const audioOnly = (isAudioIntent && !isImageIntent) && !asksBoth;
+  const imageOnly = (isImageIntent && !isAudioIntent) && !asksBoth;
 
   const normalizedContent = ensureFencedCode(content);
   const parts = normalizedContent.split(/(```[\s\S]*?```|\[AUDIO:\s*[\s\S]*?\]|\[IMAGE:\s*[\s\S]*?\]|\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\])/gi);
@@ -4111,7 +4213,7 @@ export function MarkdownRenderer({ content, onOpenBrowser, isComplete = true, us
               case "quote":
                 return <blockquote key={blockIdx}>{parseInlineMarkdown(block.lines.join(" "))}</blockquote>;
               case "p": {
-                // A lone bold line such as "🧠 **Analysis:**" acts as a section label, so it gets heading spacing
+                // A lone bold line such as "**Analysis:**" acts as a section label, so it gets heading spacing
                 const isSectionLabel = block.lines.length === 1 && /^[^\w*]*\*\*[^*]+\*\*:?$/u.test(block.lines[0].trim());
                 // Keep the model's single line breaks (addresses, emails, poems)
                 return (
