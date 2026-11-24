@@ -7590,53 +7590,64 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
   // Autonomous Media Generation extraction:
   const createdMedia = [];
 
-  // 1. Tag directives: [IMAGE: prompt="..." (, filename="...")]
-  const imgTagRegex = /\[IMAGE:\s*prompt="([^"]+)"(?:\s*,\s*filename="([^"]+)")?\s*\]/gi;
-  let imgMatch;
-  while ((imgMatch = imgTagRegex.exec(text)) !== null) {
-    const imgPrompt = imgMatch[1];
-    const filename = imgMatch[2] || `image_${createdMedia.length + 1}.png`;
-    const gen = await executeAutonomousImageGen(imgPrompt, filename, activeWs);
-    if (gen) createdMedia.push(gen);
-  }
+  const asksAudio = /\b(audio|speech|voice|podcast|read\s+aloud|narrat\w*|speak|sound|wav|mp3|say)\b/i.test(pLower);
+  const asksImage = /\b(image|picture|photo|illustration|drawing|artwork|visual|wallpaper|render\s+an?\s+image|png|jpg)\b/i.test(pLower);
+  const asksCodeOrHtml = /\b(html|website|webpage|page|app|code|script|css|game)\b/i.test(pLower);
 
-  // 2. HTML embedded directives: data-generate="..." or data-prompt="..."
-  const htmlImgRegex = /<img\s+[^>]*?(?:src=["'](?:assets\/)?([^"']+)["'][^>]*?)?(?:data-generate|data-prompt)=["']([^"']+)["'][^>]*?>/gi;
-  let htmlMatch;
-  while ((htmlMatch = htmlImgRegex.exec(text)) !== null) {
-    const filename = htmlMatch[1] || `image_${createdMedia.length + 1}.png`;
-    const imgPrompt = htmlMatch[2];
-    if (imgPrompt && !createdMedia.some(m => m.filename === filename)) {
+  const audioOnlyRequested = asksAudio && !asksImage && !asksCodeOrHtml;
+  const imageOnlyRequested = asksImage && !asksAudio;
+
+  // 1. Tag directives: [IMAGE: prompt="..." (, filename="...")]
+  if (!audioOnlyRequested) {
+    const imgTagRegex = /\[IMAGE:\s*prompt="([^"]+)"(?:\s*,\s*filename="([^"]+)")?\s*\]/gi;
+    let imgMatch;
+    while ((imgMatch = imgTagRegex.exec(text)) !== null) {
+      const imgPrompt = imgMatch[1];
+      const filename = imgMatch[2] || `image_${createdMedia.length + 1}.png`;
       const gen = await executeAutonomousImageGen(imgPrompt, filename, activeWs);
+      if (gen) createdMedia.push(gen);
+    }
+
+    // 2. HTML embedded directives: data-generate="..." or data-prompt="..."
+    const htmlImgRegex = /<img\s+[^>]*?(?:src=["'](?:assets\/)?([^"']+)["'][^>]*?)?(?:data-generate|data-prompt)=["']([^"']+)["'][^>]*?>/gi;
+    let htmlMatch;
+    while ((htmlMatch = htmlImgRegex.exec(text)) !== null) {
+      const filename = htmlMatch[1] || `image_${createdMedia.length + 1}.png`;
+      const imgPrompt = htmlMatch[2];
+      if (imgPrompt && !createdMedia.some(m => m.filename === filename)) {
+        const gen = await executeAutonomousImageGen(imgPrompt, filename, activeWs);
+        if (gen) createdMedia.push(gen);
+      }
+    }
+
+    // 3. Explicit user image generation intent if model didn't emit tag
+    const isExplicitImageGenPrompt = /^(?:generate|create|make|draw|paint|render)\s+(?:an?\s+)?(?:image|photo|picture|drawing|illustration|artwork)\s+(?:of\s+)?(.+)/i.exec(pLower);
+    if (isExplicitImageGenPrompt && isExplicitImageGenPrompt[1] && createdMedia.length === 0) {
+      const explicitPrompt = isExplicitImageGenPrompt[1].trim();
+      const gen = await executeAutonomousImageGen(explicitPrompt, `image_${Date.now()}.png`, activeWs);
       if (gen) createdMedia.push(gen);
     }
   }
 
-  // 3. Explicit user image generation intent if model didn't emit tag
-  const isExplicitImageGenPrompt = /^(?:generate|create|make|draw|paint|render)\s+(?:an?\s+)?(?:image|photo|picture|drawing|illustration|artwork)\s+(?:of\s+)?(.+)/i.exec(pLower);
-  if (isExplicitImageGenPrompt && isExplicitImageGenPrompt[1] && createdMedia.length === 0) {
-    const explicitPrompt = isExplicitImageGenPrompt[1].trim();
-    const gen = await executeAutonomousImageGen(explicitPrompt, `image_${Date.now()}.png`, activeWs);
-    if (gen) createdMedia.push(gen);
-  }
-
   // 4. Audio tag directives: [AUDIO: text="..." (, filename="...")]
-  const audioTagRegex = /\[AUDIO:\s*text="([^"]+)"(?:\s*,\s*filename="([^"]+)")?\s*\]/gi;
-  let audioMatch;
-  while ((audioMatch = audioTagRegex.exec(text)) !== null) {
-    const audioText = audioMatch[1];
-    const filename = audioMatch[2] || `audio_${createdMedia.length + 1}.wav`;
-    const gen = await executeAutonomousAudioGen(audioText, filename, activeWs);
-    if (gen) createdMedia.push(gen);
-  }
-
-  // 5. Explicit user text-to-speech intent if model didn't emit tag
-  const isExplicitAudioGenPrompt = /^(?:make|convert|turn|synthesize|read)\s+(?:this\s+)?(?:text|info|summary|story)?\s*(?:in)?to\s+audio[:\s]*(.*)/i.exec(pLower);
-  if (isExplicitAudioGenPrompt && createdMedia.filter(m => m.type === 'audio').length === 0) {
-    const candidateText = isExplicitAudioGenPrompt[1]?.trim() || text.replace(/```[\s\S]*?```/g, '').slice(0, 500).trim();
-    if (candidateText && candidateText.length > 5) {
-      const gen = await executeAutonomousAudioGen(candidateText, `audio_${Date.now()}.wav`, activeWs);
+  if (!imageOnlyRequested) {
+    const audioTagRegex = /\[AUDIO:\s*text="([^"]+)"(?:\s*,\s*filename="([^"]+)")?\s*\]/gi;
+    let audioMatch;
+    while ((audioMatch = audioTagRegex.exec(text)) !== null) {
+      const audioText = audioMatch[1];
+      const filename = audioMatch[2] || `audio_${createdMedia.length + 1}.wav`;
+      const gen = await executeAutonomousAudioGen(audioText, filename, activeWs);
       if (gen) createdMedia.push(gen);
+    }
+
+    // 5. Explicit user text-to-speech intent if model didn't emit tag
+    const isExplicitAudioGenPrompt = /^(?:make|convert|turn|synthesize|read)\s+(?:this\s+)?(?:text|info|summary|story)?\s*(?:in)?to\s+audio[:\s]*(.*)/i.exec(pLower);
+    if (isExplicitAudioGenPrompt && createdMedia.filter(m => m.type === 'audio').length === 0) {
+      const candidateText = isExplicitAudioGenPrompt[1]?.trim() || text.replace(/```[\s\S]*?```/g, '').slice(0, 500).trim();
+      if (candidateText && candidateText.length > 5) {
+        const gen = await executeAutonomousAudioGen(candidateText, `audio_${Date.now()}.wav`, activeWs);
+        if (gen) createdMedia.push(gen);
+      }
     }
   }
 
@@ -8169,7 +8180,10 @@ or for scripts/components:
    - Never tell the user to manually copy-paste or save files by hand. Everything is handled directly in the workspace.
 
 4. AUTONOMOUS MULTI-MODEL COLLABORATION (PHOTO & AUDIO ENGINES):
-   You orchestrate the full Abyx model studio directly inside the workspace:
+   STRICT REQUEST SPECIFICITY:
+   - When the user asks for audio or speech ONLY (e.g. "generate an audio", "voice", "podcast", "narrate", "read this", "speak"), emit ONLY [AUDIO: ...] and NEVER emit [IMAGE: ...] or any image directives.
+   - When the user asks for an image or picture ONLY (e.g. "generate an image", "picture", "photo", "drawing"), emit ONLY [IMAGE: ...] and NEVER emit [AUDIO: ...] or any audio directives.
+   - ONLY produce what was explicitly requested by the user. NEVER volunteer or bundle unrequested media types together unless explicitly asked for both.
    - Photo & Image Generation:
      * When the user asks to generate an image or picture, output ONLY the single directive on its own line:
        [IMAGE: prompt="detailed description of the visual scene", filename="hero.png"]
@@ -8178,7 +8192,7 @@ or for scripts/components:
        <img src="assets/hero.png" data-generate="detailed description of the visual scene" alt="Hero" />
      The Abyx photo generation engine autonomously generates real high-resolution PNGs and saves them directly into "${wsTargetDir}/assets/".
    - Audio & Speech Synthesis:
-     When the user asks to turn text, info, or summaries into speech/audio, emit:
+     When the user asks to turn text, info, summaries, or narratives into speech/audio, emit:
      [AUDIO: text="the text to speak clearly and naturally", filename="summary.wav"]
      The Kokoro speech model autonomously synthesizes high-fidelity speech and saves it directly into "${wsTargetDir}/audio/".
 ${skillsContext}`;

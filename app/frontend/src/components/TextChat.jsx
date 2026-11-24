@@ -1305,6 +1305,12 @@ function TextChat({
         }
       });
 
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      tokenBufferRef.current = null;
+
       const completedAt = performance.now();
       let finalThinkingDuration = thinkingDuration;
       if (thinkingStartedAt && !thinkingEndedAt) {
@@ -1384,6 +1390,11 @@ function TextChat({
         saveConversationState(convId, finalMessages, selectedModel);
       }
     } finally {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      tokenBufferRef.current = null;
       setIsBusy(false);
       abortControllerRef.current = null;
       setTimeout(() => {
@@ -1580,6 +1591,12 @@ function TextChat({
           }
         }]);
       });
+
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      tokenBufferRef.current = null;
 
       const completedAt = performance.now();
       const exactTokens = Number(response.timings?.predicted_n) || streamedTokens;
@@ -2391,7 +2408,7 @@ function TextChat({
                     ? displayContent.length > 0
                     : Boolean(String(displayContent || "").trim());
 
-                  const isComplete = !message.generationStats || message.generationStats.status === "complete";
+                  const isComplete = !isBusy || !message.generationStats || message.generationStats.status === "complete" || index < messages.length - 1;
 
                   // Extract detected file if model is generating code or files
                   const rawStr = typeof rawContent === "string" ? rawContent : "";
@@ -2470,7 +2487,7 @@ function TextChat({
                               </div>
                             )}
                             <div className="chat-generation-stats" style={{ border: "none", background: "transparent", padding: 0 }}>
-                              {!isComplete ? (
+                              {!isComplete && isBusy ? (
                                 <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", border: "none", background: "transparent", color: "rgba(255, 255, 255, 0.7)", fontSize: "13px" }}>
                                   <LoaderCircle size={14} className="progress-spinner" style={{ color: "rgba(255, 255, 255, 0.6)" }} />
                                   <span>{actionText}</span>
@@ -2921,40 +2938,40 @@ export function CodeBlockRenderer({ code, lang, onOpenBrowser, isComplete = true
 
   return (
     <div className="abyx-file-card-wrapper" style={{
-      margin: "12px 0",
-      borderRadius: "16px",
+      margin: "10px 0",
+      borderRadius: "12px",
       border: "1px solid rgba(255, 255, 255, 0.08)",
-      background: "#121215",
+      background: "#101014",
       overflow: "hidden",
-      boxShadow: "0 4px 16px rgba(0, 0, 0, 0.28)",
+      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.2)",
       width: "100%",
-      maxWidth: "780px"
+      maxWidth: "760px"
     }}>
-      {/* Sleek File Card Header (Exact Reference Screenshot Layout) */}
+      {/* Sleek Minimalist File Card Header */}
       <div style={{
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "12px 16px",
-        gap: "14px",
+        padding: "10px 14px",
+        gap: "12px",
         flexWrap: "wrap"
       }}>
         {/* Left: Badge & File Info */}
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0, flex: "1 1 240px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: "1 1 240px" }}>
           {/* Badge */}
           <div style={{
-            width: "42px",
-            height: "42px",
-            borderRadius: "10px",
-            background: "#1a1a22",
-            border: "1px solid rgba(255, 255, 255, 0.09)",
+            width: "36px",
+            height: "36px",
+            borderRadius: "8px",
+            background: "rgba(165, 180, 252, 0.08)",
+            border: "1px solid rgba(165, 180, 252, 0.18)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             fontFamily: "'JetBrains Mono', monospace",
-            fontSize: "11px",
+            fontSize: "10.5px",
             fontWeight: "700",
-            color: "#e2e8f0",
+            color: "#a5b4fc",
             letterSpacing: "0.5px",
             flexShrink: 0
           }}>
@@ -2964,10 +2981,10 @@ export function CodeBlockRenderer({ code, lang, onOpenBrowser, isComplete = true
           {/* Metadata Column */}
           <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
             <div style={{
-              fontSize: "13.5px",
+              fontSize: "13px",
               fontWeight: "600",
-              color: "#ffffff",
-              fontFamily: "system-ui, -apple-system, sans-serif",
+              color: "#f3f4f6",
+              letterSpacing: "-0.01em",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap"
@@ -2976,7 +2993,7 @@ export function CodeBlockRenderer({ code, lang, onOpenBrowser, isComplete = true
             </div>
             <div style={{
               fontSize: "11px",
-              color: "#888894",
+              color: "rgba(255, 255, 255, 0.45)",
               fontFamily: "'JetBrains Mono', monospace",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -2986,9 +3003,9 @@ export function CodeBlockRenderer({ code, lang, onOpenBrowser, isComplete = true
               gap: "6px"
             }}>
               <span>{badgeText}</span>
-              <span>•</span>
+              <span style={{ opacity: 0.35 }}>•</span>
               <span>{sizeStr}</span>
-              <span>•</span>
+              <span style={{ opacity: 0.35 }}>•</span>
               <span style={{ opacity: 0.85 }}>{relativeDisplayPath}</span>
             </div>
           </div>
@@ -2996,7 +3013,7 @@ export function CodeBlockRenderer({ code, lang, onOpenBrowser, isComplete = true
 
         {/* Right: Actions (Download, Reveal, Code) */}
         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
-          {/* Download (Prominent white high-contrast pill button from reference image) */}
+          {/* Download */}
           <button
             type="button"
             onClick={handleDownload}
@@ -3004,58 +3021,76 @@ export function CodeBlockRenderer({ code, lang, onOpenBrowser, isComplete = true
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              padding: "7px 16px",
-              borderRadius: "9999px",
-              background: "#ffffff",
-              color: "#050505",
+              height: "30px",
+              padding: "0 12px",
+              borderRadius: "7px",
+              background: downloaded ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.08)",
+              color: downloaded ? "#4ade80" : "#f3f4f6",
               fontSize: "12px",
-              fontWeight: "600",
-              border: "none",
+              fontWeight: "500",
+              border: downloaded ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.12)",
               cursor: "pointer",
-              transition: "all 0.15s ease",
-              boxShadow: "0 2px 8px rgba(255, 255, 255, 0.08)"
+              transition: "all 0.15s ease"
             }}
             title={`Download ${filename}`}
-            onMouseEnter={(e) => e.currentTarget.style.background = "#e5e5e5"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "#ffffff"}
+            onMouseEnter={(e) => {
+              if (!downloaded) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.13)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!downloaded) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
+              }
+            }}
           >
-            {downloaded ? <Check size={13} strokeWidth={2.6} /> : <Download size={13} strokeWidth={2.4} />}
-            <span>{downloaded ? "Downloaded" : "Download"}</span>
+            {downloaded ? <Check size={13} strokeWidth={2.4} /> : <Download size={13} strokeWidth={2} />}
+            <span>{downloaded ? "Saved" : "Download"}</span>
           </button>
 
-          {/* Reveal (Dark pill button with folder icon, reveals where file is and opens it) */}
+          {/* Reveal */}
           <button
             type="button"
             onClick={handleReveal}
+            disabled={revealing}
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              padding: "7px 14px",
-              borderRadius: "9999px",
-              background: "#1c1c23",
-              color: "#e5e7eb",
+              height: "30px",
+              padding: "0 12px",
+              borderRadius: "7px",
+              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.03)",
+              color: revealed ? "#4ade80" : "rgba(255, 255, 255, 0.75)",
               fontSize: "12px",
               fontWeight: "500",
-              border: "1px solid rgba(255, 255, 255, 0.12)",
-              cursor: "pointer",
+              border: revealed ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.08)",
+              cursor: revealing ? "wait" : "pointer",
               transition: "all 0.15s ease"
             }}
             title={`Reveal ${filename} in File Explorer`}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#262630";
-              e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.22)";
+              if (!revealed) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.color = "#f3f4f6";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.16)";
+              }
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#1c1c23";
-              e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
+              if (!revealed) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
+                e.currentTarget.style.color = "rgba(255, 255, 255, 0.75)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
+              }
             }}
           >
             {revealed ? <Check size={13} color="#4ade80" /> : <Folder size={13} />}
             <span>{revealed ? "Revealed" : revealing ? "Opening..." : "Reveal"}</span>
           </button>
 
-          {/* Code (Dark pill button with code icon, toggles code viewer) */}
+          {/* Code */}
           <button
             type="button"
             onClick={() => setShowCode(!showCode)}
@@ -3063,27 +3098,28 @@ export function CodeBlockRenderer({ code, lang, onOpenBrowser, isComplete = true
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              padding: "7px 14px",
-              borderRadius: "9999px",
-              background: showCode ? "rgba(255, 255, 255, 0.16)" : "#1c1c23",
-              color: "#e5e7eb",
+              height: "30px",
+              padding: "0 12px",
+              borderRadius: "7px",
+              background: showCode ? "rgba(165, 180, 252, 0.12)" : "rgba(255, 255, 255, 0.03)",
+              color: showCode ? "#a5b4fc" : "rgba(255, 255, 255, 0.75)",
               fontSize: "12px",
               fontWeight: "500",
-              border: showCode ? "1px solid rgba(255, 255, 255, 0.28)" : "1px solid rgba(255, 255, 255, 0.12)",
+              border: showCode ? "1px solid rgba(165, 180, 252, 0.3)" : "1px solid rgba(255, 255, 255, 0.08)",
               cursor: "pointer",
               transition: "all 0.15s ease"
             }}
             title={showCode ? "Hide source code" : "View source code"}
             onMouseEnter={(e) => {
               if (!showCode) {
-                e.currentTarget.style.background = "#262630";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.22)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.color = "#f3f4f6";
               }
             }}
             onMouseLeave={(e) => {
               if (!showCode) {
-                e.currentTarget.style.background = "#1c1c23";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
+                e.currentTarget.style.color = "rgba(255, 255, 255, 0.75)";
               }
             }}
           >
@@ -3259,51 +3295,52 @@ export function ImageBlockRenderer({ src, alt, filename }) {
 
   return (
     <div className="abyx-file-card-wrapper" style={{
-      margin: "12px 0",
-      borderRadius: "16px",
+      margin: "10px 0",
+      borderRadius: "12px",
       border: "1px solid rgba(255, 255, 255, 0.08)",
-      background: "#121215",
+      background: "#101014",
       overflow: "hidden",
-      boxShadow: "0 4px 16px rgba(0, 0, 0, 0.28)",
+      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.2)",
       width: "100%",
-      maxWidth: "780px"
+      maxWidth: "760px"
     }}>
       <div style={{
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "12px 16px",
-        gap: "14px",
+        padding: "10px 14px",
+        gap: "12px",
         flexWrap: "wrap"
       }}>
         {/* Left: Thumbnail Preview & Metadata */}
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0, flex: "1 1 240px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: "1 1 240px" }}>
           {/* Badge: Sleek Image Icon */}
           <div 
             onClick={() => setShowFull(!showFull)}
             style={{
-              width: "42px",
-              height: "42px",
-              borderRadius: "10px",
-              background: "#1a1a22",
-              border: "1px solid rgba(255, 255, 255, 0.09)",
+              width: "36px",
+              height: "36px",
+              borderRadius: "8px",
+              background: "rgba(56, 189, 248, 0.08)",
+              border: "1px solid rgba(56, 189, 248, 0.2)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               cursor: "pointer",
               flexShrink: 0,
-              boxShadow: "0 2px 6px rgba(0, 0, 0, 0.2)"
+              transition: "all 0.15s ease"
             }}
             title="Click to toggle image preview"
           >
-            <ImageIcon size={20} style={{ color: "#38bdf8" }} />
+            <ImageIcon size={18} style={{ color: "#38bdf8" }} />
           </div>
 
           <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
             <div style={{
-              fontSize: "13.5px",
+              fontSize: "13px",
               fontWeight: "600",
-              color: "#ffffff",
+              color: "#f3f4f6",
+              letterSpacing: "-0.01em",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap"
@@ -3312,7 +3349,7 @@ export function ImageBlockRenderer({ src, alt, filename }) {
             </div>
             <div style={{
               fontSize: "11px",
-              color: "#888894",
+              color: "rgba(255, 255, 255, 0.45)",
               fontFamily: "'JetBrains Mono', monospace",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -3322,7 +3359,7 @@ export function ImageBlockRenderer({ src, alt, filename }) {
               gap: "6px"
             }}>
               <span>PNG</span>
-              <span>•</span>
+              <span style={{ opacity: 0.35 }}>•</span>
               <span style={{ opacity: 0.85 }}>abyx/assets/{cleanFilename}</span>
             </div>
           </div>
@@ -3337,18 +3374,32 @@ export function ImageBlockRenderer({ src, alt, filename }) {
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              padding: "7px 16px",
-              borderRadius: "9999px",
-              background: "#ffffff",
-              color: "#050505",
+              height: "30px",
+              padding: "0 12px",
+              borderRadius: "7px",
+              background: downloaded ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.08)",
+              color: downloaded ? "#4ade80" : "#f3f4f6",
               fontSize: "12px",
-              fontWeight: "600",
-              border: "none",
-              cursor: "pointer"
+              fontWeight: "500",
+              border: downloaded ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.12)",
+              cursor: "pointer",
+              transition: "all 0.15s ease"
             }}
             title="Download Image"
+            onMouseEnter={(e) => {
+              if (!downloaded) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.13)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!downloaded) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
+              }
+            }}
           >
-            {downloaded ? <Check size={14} /> : <Download size={14} />}
+            {downloaded ? <Check size={13} strokeWidth={2.4} /> : <Download size={13} strokeWidth={2} />}
             <span>{downloaded ? "Saved" : "Download"}</span>
           </button>
 
@@ -3360,19 +3411,35 @@ export function ImageBlockRenderer({ src, alt, filename }) {
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              padding: "6px 14px",
-              borderRadius: "9999px",
-              background: "rgba(255, 255, 255, 0.05)",
-              color: "#e2e8f0",
+              height: "30px",
+              padding: "0 12px",
+              borderRadius: "7px",
+              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.03)",
+              color: revealed ? "#4ade80" : "rgba(255, 255, 255, 0.75)",
               fontSize: "12px",
               fontWeight: "500",
-              border: "1px solid rgba(255, 255, 255, 0.12)",
-              cursor: revealing ? "wait" : "pointer"
+              border: revealed ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.08)",
+              cursor: revealing ? "wait" : "pointer",
+              transition: "all 0.15s ease"
             }}
             title="Reveal in Windows Explorer"
+            onMouseEnter={(e) => {
+              if (!revealed) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.color = "#f3f4f6";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.16)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!revealed) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
+                e.currentTarget.style.color = "rgba(255, 255, 255, 0.75)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
+              }
+            }}
           >
-            <Folder size={14} />
-            <span>{revealed ? "Revealed" : "Reveal"}</span>
+            {revealed ? <Check size={13} color="#4ade80" /> : <Folder size={13} />}
+            <span>{revealed ? "Revealed" : revealing ? "Opening..." : "Reveal"}</span>
           </button>
 
           <button
@@ -3381,18 +3448,31 @@ export function ImageBlockRenderer({ src, alt, filename }) {
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: "4px",
-              padding: "6px 10px",
-              borderRadius: "8px",
-              background: showFull ? "rgba(255, 255, 255, 0.12)" : "rgba(255, 255, 255, 0.05)",
-              color: "#e2e8f0",
-              fontSize: "12px",
-              border: "none",
-              cursor: "pointer"
+              justifyContent: "center",
+              width: "30px",
+              height: "30px",
+              borderRadius: "7px",
+              background: showFull ? "rgba(56, 189, 248, 0.12)" : "rgba(255, 255, 255, 0.03)",
+              color: showFull ? "#38bdf8" : "rgba(255, 255, 255, 0.75)",
+              border: showFull ? "1px solid rgba(56, 189, 248, 0.28)" : "1px solid rgba(255, 255, 255, 0.08)",
+              cursor: "pointer",
+              transition: "all 0.15s ease"
             }}
-            title="Toggle preview"
+            title={showFull ? "Collapse preview" : "View preview"}
+            onMouseEnter={(e) => {
+              if (!showFull) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.color = "#f3f4f6";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!showFull) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
+                e.currentTarget.style.color = "rgba(255, 255, 255, 0.75)";
+              }
+            }}
           >
-            <Eye size={14} />
+            <Eye size={13} strokeWidth={2} />
           </button>
         </div>
       </div>
@@ -3530,52 +3610,59 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
 
   return (
     <div className="abyx-file-card-wrapper" style={{
-      margin: "12px 0",
-      borderRadius: "16px",
+      margin: "10px 0",
+      borderRadius: "12px",
       border: "1px solid rgba(255, 255, 255, 0.08)",
-      background: "#121215",
+      background: "#101014",
       overflow: "hidden",
-      boxShadow: "0 4px 16px rgba(0, 0, 0, 0.28)",
+      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.2)",
       width: "100%",
-      maxWidth: "780px"
+      maxWidth: "760px"
     }}>
       <div style={{
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "12px 16px",
-        gap: "14px",
+        padding: "10px 14px",
+        gap: "12px",
         flexWrap: "wrap"
       }}>
         {/* Left: Play/Pause & Info */}
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0, flex: "1 1 240px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: "1 1 240px" }}>
           <button
             type="button"
             onClick={togglePlay}
             style={{
-              width: "42px",
-              height: "42px",
-              borderRadius: "50%",
-              background: isPlaying ? "#45D483" : "#1a1a22",
-              color: isPlaying ? "#050505" : "#45D483",
-              border: "1px solid rgba(69, 212, 131, 0.3)",
+              width: "36px",
+              height: "36px",
+              borderRadius: "8px",
+              background: isPlaying ? "rgba(69, 212, 131, 0.18)" : "rgba(69, 212, 131, 0.08)",
+              color: "#45D483",
+              border: isPlaying ? "1px solid rgba(69, 212, 131, 0.45)" : "1px solid rgba(69, 212, 131, 0.22)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               cursor: "pointer",
               flexShrink: 0,
-              transition: "all 0.2s ease"
+              transition: "all 0.15s ease"
             }}
             title={isPlaying ? "Pause" : "Play Kokoro Audio"}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = isPlaying ? "rgba(69, 212, 131, 0.26)" : "rgba(69, 212, 131, 0.16)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = isPlaying ? "rgba(69, 212, 131, 0.18)" : "rgba(69, 212, 131, 0.08)";
+            }}
           >
-            {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" style={{ marginLeft: "2px" }} />}
+            {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" style={{ marginLeft: "2px" }} />}
           </button>
 
           <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px", flex: 1 }}>
             <div style={{
-              fontSize: "13.5px",
+              fontSize: "13px",
               fontWeight: "600",
-              color: "#ffffff",
+              color: "#f3f4f6",
+              letterSpacing: "-0.01em",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap"
@@ -3584,23 +3671,23 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
             </div>
             <div style={{
               fontSize: "11px",
-              color: "#888894",
+              color: "rgba(255, 255, 255, 0.45)",
               fontFamily: "'JetBrains Mono', monospace",
               display: "flex",
               alignItems: "center",
               gap: "6px"
             }}>
               <span>WAV</span>
-              <span>•</span>
+              <span style={{ opacity: 0.35 }}>•</span>
               <span>Kokoro AI</span>
-              {duration ? <><span>•</span><span>{duration}</span></> : null}
+              {duration ? <><span style={{ opacity: 0.35 }}>•</span><span>{duration}</span></> : null}
             </div>
             {/* Live playback bar */}
             {isPlaying && (
               <div style={{
                 width: "100%",
-                height: "3px",
-                background: "rgba(255, 255, 255, 0.1)",
+                height: "2px",
+                background: "rgba(255, 255, 255, 0.08)",
                 borderRadius: "2px",
                 marginTop: "4px",
                 overflow: "hidden"
@@ -3625,18 +3712,32 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              padding: "7px 16px",
-              borderRadius: "9999px",
-              background: "#ffffff",
-              color: "#050505",
+              height: "30px",
+              padding: "0 12px",
+              borderRadius: "7px",
+              background: downloaded ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.08)",
+              color: downloaded ? "#4ade80" : "#f3f4f6",
               fontSize: "12px",
-              fontWeight: "600",
-              border: "none",
-              cursor: "pointer"
+              fontWeight: "500",
+              border: downloaded ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.12)",
+              cursor: "pointer",
+              transition: "all 0.15s ease"
             }}
             title="Download Audio WAV"
+            onMouseEnter={(e) => {
+              if (!downloaded) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.13)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!downloaded) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
+              }
+            }}
           >
-            {downloaded ? <Check size={14} /> : <Download size={14} />}
+            {downloaded ? <Check size={13} strokeWidth={2.4} /> : <Download size={13} strokeWidth={2} />}
             <span>{downloaded ? "Saved" : "Download"}</span>
           </button>
 
@@ -3648,19 +3749,35 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
               display: "inline-flex",
               alignItems: "center",
               gap: "6px",
-              padding: "6px 14px",
-              borderRadius: "9999px",
-              background: "rgba(255, 255, 255, 0.05)",
-              color: "#e2e8f0",
+              height: "30px",
+              padding: "0 12px",
+              borderRadius: "7px",
+              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.03)",
+              color: revealed ? "#4ade80" : "rgba(255, 255, 255, 0.75)",
               fontSize: "12px",
               fontWeight: "500",
-              border: "1px solid rgba(255, 255, 255, 0.12)",
-              cursor: revealing ? "wait" : "pointer"
+              border: revealed ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.08)",
+              cursor: revealing ? "wait" : "pointer",
+              transition: "all 0.15s ease"
             }}
             title="Reveal in Windows Explorer"
+            onMouseEnter={(e) => {
+              if (!revealed) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.color = "#f3f4f6";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.16)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!revealed) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
+                e.currentTarget.style.color = "rgba(255, 255, 255, 0.75)";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
+              }
+            }}
           >
-            <Folder size={14} />
-            <span>{revealed ? "Revealed" : "Reveal"}</span>
+            {revealed ? <Check size={13} color="#4ade80" /> : <Folder size={13} />}
+            <span>{revealed ? "Revealed" : revealing ? "Opening..." : "Reveal"}</span>
           </button>
         </div>
       </div>
@@ -3715,6 +3832,13 @@ function ensureFencedCode(content) {
 export function MarkdownRenderer({ content, onOpenBrowser, isComplete = true, userPrompt = "" }) {
   if (typeof content !== 'string') return null;
 
+  const pLower = (userPrompt || "").toLowerCase();
+  const asksAudio = /\b(audio|speech|voice|podcast|read\s+aloud|narrat\w*|speak|sound|wav|mp3|say)\b/i.test(pLower);
+  const asksImage = /\b(image|picture|photo|illustration|drawing|artwork|visual|wallpaper|render\s+an?\s+image|png|jpg)\b/i.test(pLower);
+  const asksAppOrCode = /\b(html|website|webpage|page|app|code|script|css|game)\b/i.test(pLower);
+  const audioOnly = asksAudio && !asksImage && !asksAppOrCode;
+  const imageOnly = asksImage && !asksAudio;
+
   const normalizedContent = ensureFencedCode(content);
   const parts = normalizedContent.split(/(```[\s\S]*?```|\[AUDIO:\s*[\s\S]*?\]|\[IMAGE:\s*[\s\S]*?\]|\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\])/gi);
   const isTableSeparator = (line) => /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/.test(line.trim());
@@ -3731,6 +3855,7 @@ export function MarkdownRenderer({ content, onOpenBrowser, isComplete = true, us
           return <MathFormula key={index} tex={part.slice(2, -2).trim()} display />;
         }
         if (part.startsWith("[AUDIO:") && part.endsWith("]")) {
+          if (imageOnly) return null;
           const audioMatch = part.match(/\[AUDIO:\s*([\s\S]*?)\]/i);
           if (audioMatch) {
             const tagContent = audioMatch[1];
@@ -3752,6 +3877,7 @@ export function MarkdownRenderer({ content, onOpenBrowser, isComplete = true, us
           }
         }
         if (part.startsWith("[IMAGE:") && part.endsWith("]")) {
+          if (audioOnly) return null;
           const imgMatch = part.match(/\[IMAGE:\s*([\s\S]*?)\]/i);
           if (imgMatch) {
             const tagContent = imgMatch[1];
@@ -3824,54 +3950,62 @@ export function MarkdownRenderer({ content, onOpenBrowser, isComplete = true, us
               blocks.push({ type: "hr" });
             } else if (/^!\[(.*?)\]\((.*?)\)$/.test(trimmed)) {
               if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              const m = trimmed.match(/^!\[(.*?)\]\((.*?)\)$/);
-              blocks.push({ type: "image_card", alt: m[1], src: m[2] });
+              if (!audioOnly) {
+                const m = trimmed.match(/^!\[(.*?)\]\((.*?)\)$/);
+                blocks.push({ type: "image_card", alt: m[1], src: m[2] });
+              }
             } else if (/\[AUDIO:\s*[\s\S]*?\]/i.test(trimmed)) {
               if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              const audioMatch = trimmed.match(/\[AUDIO:\s*([\s\S]*?)\]/i);
-              if (audioMatch) {
-                const tagContent = audioMatch[1];
-                const srcM = tagContent.match(/src="([^"]+)"/i);
-                const nameM = tagContent.match(/(?:filename|name)="([^"]+)"/i);
-                const durM = tagContent.match(/duration="([^"]+)"/i);
-                const textM = tagContent.match(/text="([^"]+)"/i);
-                const fname = nameM ? nameM[1].split("/").pop().split("\\").pop() : "speech.wav";
-                const audioSrc = srcM ? srcM[1] : `/tts-outputs/${encodeURIComponent(fname)}`;
-                if (!blocks.some(b => b.type === "audio_card" && b.filename === fname)) {
-                  blocks.push({
-                    type: "audio_card",
-                    src: audioSrc,
-                    filename: fname,
-                    duration: durM ? durM[1] : "",
-                    text: textM ? textM[1] : ""
-                  });
-                }
-                const remainingText = trimmed.replace(/\[AUDIO:\s*[\s\S]*?\]/i, "").trim();
-                if (remainingText) {
-                  blocks.push({ type: "p", lines: [remainingText] });
+              if (!imageOnly) {
+                const audioMatch = trimmed.match(/\[AUDIO:\s*([\s\S]*?)\]/i);
+                if (audioMatch) {
+                  const tagContent = audioMatch[1];
+                  const srcM = tagContent.match(/src="([^"]+)"/i);
+                  const nameM = tagContent.match(/(?:filename|name)="([^"]+)"/i);
+                  const durM = tagContent.match(/duration="([^"]+)"/i);
+                  const textM = tagContent.match(/text="([^"]+)"/i);
+                  const fname = nameM ? nameM[1].split("/").pop().split("\\").pop() : "speech.wav";
+                  const audioSrc = srcM ? srcM[1] : `/tts-outputs/${encodeURIComponent(fname)}`;
+                  if (!blocks.some(b => b.type === "audio_card" && b.filename === fname)) {
+                    blocks.push({
+                      type: "audio_card",
+                      src: audioSrc,
+                      filename: fname,
+                      duration: durM ? durM[1] : "",
+                      text: textM ? textM[1] : ""
+                    });
+                  }
+                  const remainingText = trimmed.replace(/\[AUDIO:\s*[\s\S]*?\]/i, "").trim();
+                  if (remainingText) {
+                    blocks.push({ type: "p", lines: [remainingText] });
+                  }
                 }
               }
             } else if (/^\[IMAGE:\s*prompt="([^"]+)".*?\]$/i.test(trimmed)) {
               if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              const pM = trimmed.match(/prompt="([^"]+)"/i);
-              const fM = trimmed.match(/filename="([^"]+)"/i);
-              const fname = fM ? fM[1].split("/").pop().split("\\").pop() : "image.png";
-              if (!blocks.some(b => b.type === "image_card" && b.filename === fname)) {
-                blocks.push({ type: "image_card", alt: pM ? pM[1] : "", src: `/api/output-file?filename=${encodeURIComponent(fname)}`, filename: fname });
+              if (!audioOnly) {
+                const pM = trimmed.match(/prompt="([^"]+)"/i);
+                const fM = trimmed.match(/filename="([^"]+)"/i);
+                const fname = fM ? fM[1].split("/").pop().split("\\").pop() : "image.png";
+                if (!blocks.some(b => b.type === "image_card" && b.filename === fname)) {
+                  blocks.push({ type: "image_card", alt: pM ? pM[1] : "", src: `/api/output-file?filename=${encodeURIComponent(fname)}`, filename: fname });
+                }
               }
             } else if (/<img\s+[^>]*src=["'](?:assets\/)?([^"']+)["'][^>]*>/i.test(trimmed)) {
               if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              const m = trimmed.match(/<img\s+[^>]*src=["'](?:assets\/)?([^"']+)["'][^>]*>/i);
-              const altM = trimmed.match(/alt=["']([^"']+)["']/i);
-              const dataGenM = trimmed.match(/data-generate=["']([^"']+)["']/i);
-              const fname = m ? m[1].split("/").pop().split("\\").pop() : "image.png";
-              if (!blocks.some(b => b.type === "image_card" && b.filename === fname)) {
-                blocks.push({
-                  type: "image_card",
-                  alt: altM ? altM[1] : (dataGenM ? dataGenM[1] : "Generated image"),
-                  src: `/api/output-file?filename=${encodeURIComponent(fname)}`,
-                  filename: fname
-                });
+              if (!audioOnly) {
+                const m = trimmed.match(/<img\s+[^>]*src=["'](?:assets\/)?([^"']+)["'][^>]*>/i);
+                const altM = trimmed.match(/alt=["']([^"']+)["']/i);
+                const dataGenM = trimmed.match(/data-generate=["']([^"']+)["']/i);
+                const fname = m ? m[1].split("/").pop().split("\\").pop() : "image.png";
+                if (!blocks.some(b => b.type === "image_card" && b.filename === fname)) {
+                  blocks.push({
+                    type: "image_card",
+                    alt: altM ? altM[1] : (dataGenM ? dataGenM[1] : "Generated image"),
+                    src: `/api/output-file?filename=${encodeURIComponent(fname)}`,
+                    filename: fname
+                  });
+                }
               }
             } else if (/^<!--\s*path:\s*[^>]+\s*-->$/i.test(trimmed)) {
               // Ignore path comments in rendered markdown text
