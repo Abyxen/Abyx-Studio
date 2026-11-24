@@ -891,7 +891,11 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, maxHeight: 450, overflowY: "auto" }}>
-              {skills.filter(s => !skillFilter || s.id.toLowerCase().includes(skillFilter.toLowerCase()) || (s.name || "").toLowerCase().includes(skillFilter.toLowerCase())).map((skill) => (
+              {skills.length === 0 ? (
+                <div style={{ padding: "32px 16px", color: "var(--md-sys-color-outline)", fontSize: "0.85rem", textAlign: "center", gridColumn: "1 / -1" }}>
+                  No custom skills installed. Custom skills can be added via <code>data/extensions/installed/skills/</code>.
+                </div>
+              ) : skills.filter(s => !skillFilter || s.id.toLowerCase().includes(skillFilter.toLowerCase()) || (s.name || "").toLowerCase().includes(skillFilter.toLowerCase())).map((skill) => (
                 <div key={skill.id} style={{ padding: "12px 14px", background: "var(--card-bg)", borderRadius: 6, border: "1px solid var(--border-color)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                     <div style={{ fontWeight: 600, fontSize: "0.88rem" }}>{skill.name || skill.id}</div>

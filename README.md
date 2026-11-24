@@ -382,8 +382,7 @@ Abyx-Studio/
 │   ├── setup/setup.sh         # Linux/macOS bootstrapper
 │   └── build/                 # Source build tools for CUDA/Vulkan backends
 ├── security/                  # Path guards, input sanitation & execution policies
-├── services/                  # Memory, skills & background workers
-└── skills/                    # Specialized agent skills library
+└── services/                  # Memory, workspace & background workers
 ```
 
 ---

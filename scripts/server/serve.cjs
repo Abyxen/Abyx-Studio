@@ -133,7 +133,11 @@ let abyxSkills = null;
 try {
   abyxSkills = require(path.join(ROOT, "services", "abyx_skills.js"));
   const count = typeof abyxSkills.indexSkills === 'function' ? abyxSkills.indexSkills().length : 0;
-  console.log(`  [abyx] Initialized Abyx Universal Skills & Plugins Hub (${count} skills ready)`);
+  if (count > 0) {
+    console.log(`  [abyx] Initialized Abyx Universal Skills & Plugins Hub (${count} skills ready)`);
+  } else {
+    console.log(`  [abyx] Initialized Abyx Universal Skills & Plugins Hub (extensible)`);
+  }
 } catch (e) {
   console.warn("  [abyx] Could not load abyx_skills.js:", e.message);
 }

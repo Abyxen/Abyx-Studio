@@ -60,6 +60,10 @@ test_*
 scratch_*
 *.txt.out
 
+# Skills & Extensions Local Cache
+skills/
+**/skills/
+
 # Dependencies
 node_modules/
 **/node_modules/
