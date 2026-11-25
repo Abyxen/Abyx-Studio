@@ -1,7 +1,7 @@
 import React, { memo, useMemo, useRef, useState, useEffect } from "react";
 import {
   Image, Film, Box, Mic, Settings, Trash2, AudioLines, SquarePen, PanelLeftClose,
-  Search, X, ChevronRight, Pin, Pencil, Download, Check
+  Search, X, ChevronRight, Pin, Pencil, Download, Check, Cpu
 } from "lucide-react";
 import BrandMark from "./BrandMark";
 
@@ -320,6 +320,7 @@ function Sidebar({
   ]);
 
   const navItems = [
+    { tab: "harness", label: "Agent Studio", Icon: Cpu },
     { tab: "generator", label: "Images", Icon: Image },
     { tab: "video", label: "Video", Icon: Film },
     { tab: "speech", label: "Transcribe", Icon: Mic },

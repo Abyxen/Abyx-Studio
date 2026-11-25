@@ -5,6 +5,8 @@ import {
   Trash2, Move, Download, ExternalLink, Search, Sparkles, Check, X, Eye, FileCode, Users
 } from "lucide-react";
 import SubagentsHub from "./SubagentsHub";
+import TerminalConsole from "./TerminalConsole";
+import DiffViewer from "./DiffViewer";
 import {
   getHarnessStatus, getHarnessPlugins, getHarnessSeams,
   startAgentRun, listAgentRuns, getPendingApprovals, resolveAgentApproval, cancelAgentRun,
@@ -354,6 +356,7 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
         <div style={{ display: "flex", gap: 8, marginTop: 18, borderBottom: "1px solid var(--border-color)", paddingBottom: 8, overflowX: "auto" }}>
           {[
             { id: "agent", label: "Agent Tasks & Loop", icon: Play },
+            { id: "terminal", label: "Terminal Runner", icon: Terminal },
             { id: "subagents", label: "Subagent Team (7)", icon: Users },
             { id: "skills", label: "Skills (76)", icon: Sparkles },
             { id: "files", label: "Workspace & Documents", icon: HardDrive },
@@ -982,6 +985,13 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Terminal Runner Tab */}
+      {activeTab === "terminal" && (
+        <div style={{ marginTop: 18 }}>
+          <TerminalConsole />
         </div>
       )}
     </div>

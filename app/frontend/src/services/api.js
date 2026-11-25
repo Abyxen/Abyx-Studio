@@ -1920,6 +1920,24 @@ export async function startAgentRun(params) {
   return await readJsonResponse(res, "Failed to execute agent run.");
 }
 
+export async function executeTerminalCommand(command, cwd = ".", timeoutMs = 15000) {
+  const res = await fetch("/api/terminal/execute", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command, cwd, timeoutMs }),
+  });
+  return await readJsonResponse(res, "Terminal execution failed.");
+}
+
+export async function getFileDiff(filePath, newContent, originalContent = "") {
+  const res = await fetch("/api/files/diff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filePath, newContent, originalContent }),
+  });
+  return await readJsonResponse(res, "Failed to compute diff.");
+}
+
 // ── Workspace & Universal File Operations API ──────────────────────────────
 
 export async function listHarnessWorkspaceFiles() {

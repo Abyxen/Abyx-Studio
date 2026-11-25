@@ -3225,6 +3225,13 @@ async function killLlm() {
   llmSettings.visionMode = "none";
   llmSettings.visionStatus = "Projector not loaded";
   llmSettings.mmproj = null;
+
+  if (osPlatform === "win32") {
+    try {
+      spawnSync("taskkill", ["/F", "/IM", "llama-server.exe", "/T"], { stdio: "ignore", windowsHide: true });
+    } catch (_) {}
+  }
+
   if (!llmProc) {
     await waitForPortAvailable(PORT_LLM, 1500);
     return;
@@ -4845,10 +4852,10 @@ async function startLlmWithBackend(settings = {}, backend) {
   const isAbyxModel = lowerFilename.includes("abyx");
   const isInklingModel = lowerFilename.includes("inkling");
   let effectiveGpuLayers = isSyclBackend ? getStableSyclGpuLayers(filename, requestedGpuLayers) : requestedGpuLayers;
-  if (!isSyclBackend && isSmallGpu && requestedGpuLayers === -1 && isInklingModel) {
+  if (!isSyclBackend && isSmallGpu && (requestedGpuLayers === -1 || requestedGpuLayers === 0) && isInklingModel) {
     effectiveGpuLayers = 14;
   }
-  const effectiveFlashAttn = isSyclBackend ? false : (loadProfile.flashAttn ?? (settings.flashAttn !== false));
+  const effectiveFlashAttn = (isSyclBackend || isInklingModel) ? false : (loadProfile.flashAttn ?? (settings.flashAttn !== false));
   const fallbackCacheType = (isAbyxModel || isInklingModel || isSmallGpu) ? "q4_0" : "q8_0";
   const effectiveCacheTypeK = (isSyclBackend || isAbyxModel || isInklingModel) ? "q4_0" : (settings.cacheTypeK || loadProfile.cacheTypeK || fallbackCacheType);
   const effectiveCacheTypeV = (isSyclBackend || isAbyxModel || isInklingModel) ? "q4_0" : (settings.cacheTypeV || loadProfile.cacheTypeV || fallbackCacheType);

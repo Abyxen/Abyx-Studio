@@ -23,7 +23,7 @@ function getAgentRuntime(workspaceService, profileId = "prof_default") {
   if (!agentRuntimes.has(runtimeKey)) {
     const engine = createAgentEngine({
       approvedRoots: [workspacePath],
-      allowTerminal: false,
+      allowTerminal: true,
       allowBrowser: true,
       approvalTimeoutMs: 300000,
     });
@@ -443,6 +443,85 @@ Do not claim an action succeeded unless its tool result confirms it. Current ste
       return json(res, result.success ? 200 : 400, result);
     } catch (err) {
       return json(res, 400, { ok: false, error: err.message });
+    }
+  }
+
+  // POST /api/files/diff (Compute unified diff between old and new text)
+  if (req.method === "POST" && pathname === "/api/files/diff") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      let originalContent = body.originalContent || "";
+      let newContent = body.newContent || "";
+      const filePath = body.filePath || body.path || "";
+
+      if (filePath && !originalContent) {
+        const runtime = getAgentRuntime(workspaceService, profileId);
+        try {
+          const safePath = runtime.pathGuard.resolveSafePath(filePath);
+          if (fs.existsSync(safePath) && fs.statSync(safePath).isFile()) {
+            originalContent = fs.readFileSync(safePath, "utf8");
+          }
+        } catch (_) {}
+      }
+
+      // Compute line-by-line diff
+      const oldLines = originalContent.split("\n");
+      const newLines = newContent.split("\n");
+      const diffLines = [];
+      let additions = 0;
+      let deletions = 0;
+
+      let i = 0, j = 0;
+      while (i < oldLines.length || j < newLines.length) {
+        if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
+          diffLines.push({ type: "common", text: oldLines[i], oldLine: i + 1, newLine: j + 1 });
+          i++; j++;
+        } else if (j < newLines.length && (i >= oldLines.length || !oldLines.slice(i, i + 5).includes(newLines[j]))) {
+          diffLines.push({ type: "added", text: newLines[j], newLine: j + 1 });
+          additions++;
+          j++;
+        } else if (i < oldLines.length) {
+          diffLines.push({ type: "deleted", text: oldLines[i], oldLine: i + 1 });
+          deletions++;
+          i++;
+        }
+      }
+
+      return json(res, 200, {
+        ok: true,
+        filePath,
+        additions,
+        deletions,
+        diffLines,
+        summary: `+${additions} / -${deletions}`
+      });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // POST /api/terminal/execute (Run command through controlled terminal tool)
+  if (req.method === "POST" && pathname === "/api/terminal/execute") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body || !body.command) {
+        return json(res, 400, { ok: false, error: "command string is required" });
+      }
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      const policyCheck = runtime.policyEngine.evaluateToolCall("execute_terminal_command", { command: body.command });
+      if (policyCheck.riskLevel === "denied") {
+        return json(res, 403, { ok: false, error: `Command blocked by policy: ${policyCheck.reason}` });
+      }
+      const timeoutMs = Math.min(Math.max(Number(body.timeoutMs) || 15000, 1000), 45000);
+      const result = await runtime.terminalTool.execute({
+        command: body.command,
+        cwd: body.cwd || ".",
+        timeoutMs
+      });
+      return json(res, result.success ? 200 : 400, { ok: result.success, ...result });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
     }
   }
 

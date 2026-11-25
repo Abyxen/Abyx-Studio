@@ -26,11 +26,11 @@
         "gpuLayers": -1,
         "cacheTypeK": "q4_0",
         "cacheTypeV": "q4_0",
-        "batchSize": 512,
-        "ubatchSize": 512,
+        "batchSize": 256,
+        "ubatchSize": 256,
         "flashAttn": true
       },
-      "updatedAt": "2026-11-25T08:41:02.480Z"
+      "updatedAt": "2026-11-25T09:10:05.973Z"
     },
     "Inkling-2-Mini-UD-Q4_K_M.gguf": {
       "preferredBackend": "cuda",
@@ -38,15 +38,15 @@
       "lastBackendBinary": "llama-server.exe",
       "lastSettings": {
         "threads": 16,
-        "contextSize": 4096,
-        "gpuLayers": 0,
+        "contextSize": 8192,
+        "gpuLayers": 14,
         "cacheTypeK": "q4_0",
         "cacheTypeV": "q4_0",
-        "batchSize": 256,
-        "ubatchSize": 256,
+        "batchSize": 512,
+        "ubatchSize": 512,
         "flashAttn": false
       },
-      "updatedAt": "2026-11-25T09:05:04.434Z"
+      "updatedAt": "2026-11-25T09:30:33.741Z"
     }
   }
 }
