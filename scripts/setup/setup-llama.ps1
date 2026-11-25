@@ -1,4 +1,4 @@
-param([string]$Release = "b11418")
+param([string]$Release = "b12720")
 
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path

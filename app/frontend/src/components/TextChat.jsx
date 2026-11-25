@@ -4,7 +4,8 @@ import {
   Lightbulb, Zap, FileText, ArrowUp, Brain, Mic, AudioLines, Image as ImageIcon,
   PanelLeft, Volume2, RotateCcw, ThumbsUp, ThumbsDown, Copy, Check, Pin,
   Download, Sparkles, RefreshCw, FolderKanban, FileCode, Eye, ExternalLink,
-  Folder, Code2, Terminal, CheckCircle, Circle, Play, Pause, Settings, GitBranch, Layers, Clock
+  Folder, Code2, Terminal, CheckCircle, Circle, Play, Pause, Settings, GitBranch, Layers, Clock,
+  UploadCloud, FileArchive, FileUp, File
 } from "lucide-react";
 import {
   getBackendStatus,
@@ -695,15 +696,17 @@ function TextChat({
     return Math.max(wordCount, Math.ceil(value.length / 4));
   };
 
-  // Pi-inspired sliding window context compaction to prevent OOM and reduce latency on long sessions
-  const compactConversationMessages = (msgs, maxEstimatedTokens = 12000) => {
+  // Context compaction threshold dynamically calibrated to model context window (supporting up to 262,144 tokens)
+  const compactConversationMessages = (msgs, maxEstimatedTokens) => {
+    const contextLimit = Number(status.settings?.contextSize || textSettings?.contextSize || 262144);
+    const limit = maxEstimatedTokens !== undefined ? maxEstimatedTokens : Math.max(120000, Math.floor(contextLimit * 0.75));
     if (!Array.isArray(msgs) || msgs.length <= 8) return msgs;
     let totalTokens = 0;
     for (const m of msgs) {
       const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content || "");
       totalTokens += estimateTokens(text);
     }
-    if (totalTokens <= maxEstimatedTokens) return msgs;
+    if (totalTokens <= limit) return msgs;
 
     const recentCount = 6;
     const recentMessages = msgs.slice(-recentCount);
@@ -734,10 +737,10 @@ function TextChat({
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
   const getAutoMaxResponseTokens = (promptTokens, thinkingEnabled) => {
-    const contextLimit = Number(status.settings?.contextSize || textSettings?.contextSize || 32768);
-    const safetyBuffer = thinkingEnabled ? 512 : 256;
-    const available = Math.max(4096, contextLimit - promptTokens - safetyBuffer);
-    return Math.min(32768, available);
+    const contextLimit = Number(status.settings?.contextSize || textSettings?.contextSize || 262144);
+    const safetyBuffer = thinkingEnabled ? 1024 : 512;
+    const available = Math.max(8192, contextLimit - promptTokens - safetyBuffer);
+    return Math.min(65536, available);
   };
   
   const bottomRef = useRef(null);
@@ -815,23 +818,155 @@ function TextChat({
     reader.readAsDataURL(file);
   });
 
-  const handleFileChange = (e) => {
-    const files = Array.from(e.target.files);
-    if (!files || files.length === 0) return;
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const dragCounterRef = useRef(0);
 
-    files.forEach((file) => {
-      if (isImage(file)) {
-        if (!supportsVision) {
-          showAlert({
-            title: "Vision Model Required",
-            message: "To attach images, please select and load a multimodal/vision model with an mmproj file.",
-            danger: true,
-          });
-          return;
+  const formatFileSize = (bytes) => {
+    if (!bytes || bytes <= 0) return "0 B";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Failed to read file ${file.name}`));
+    reader.onload = () => {
+      const res = reader.result;
+      const base64 = typeof res === "string" ? res.split(",")[1] || "" : "";
+      resolve(base64);
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const inspectZipArchive = (arrayBuffer) => {
+    try {
+      const view = new DataView(arrayBuffer);
+      const len = arrayBuffer.byteLength;
+      let eocdOffset = -1;
+      for (let i = len - 22; i >= Math.max(0, len - 65557); i--) {
+        if (view.getUint32(i, true) === 0x06054b50) {
+          eocdOffset = i;
+          break;
         }
-        optimizeImageForVision(file)
-          .then((image) => {
-            setAttachments((prev) => [
+      }
+      if (eocdOffset === -1) return null;
+      const entryCount = view.getUint16(eocdOffset + 10, true);
+      const cdOffset = view.getUint32(eocdOffset + 16, true);
+      const entries = [];
+      let offset = cdOffset;
+      const decoder = new TextDecoder("utf-8");
+      for (let k = 0; k < entryCount && offset < eocdOffset; k++) {
+        if (view.getUint32(offset, true) !== 0x02014b50) break;
+        const uncompressedSize = view.getUint32(offset + 24, true);
+        const filenameLen = view.getUint16(offset + 28, true);
+        const extraLen = view.getUint16(offset + 30, true);
+        const commentLen = view.getUint16(offset + 32, true);
+        const nameBytes = new Uint8Array(arrayBuffer, offset + 46, filenameLen);
+        const filename = decoder.decode(nameBytes);
+        entries.push({ filename, size: uncompressedSize });
+        offset += 46 + filenameLen + extraLen + commentLen;
+      }
+      return entries;
+    } catch (_) {
+      return null;
+    }
+  };
+
+  const saveFileToWorkspaceUploads = async (file) => {
+    try {
+      const base64 = await fileToBase64(file);
+      await fetch("/api/files/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          subfolder: "uploads",
+          content: base64,
+          encoding: "base64"
+        })
+      });
+    } catch (_) {}
+  };
+
+  const processIncomingFiles = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+
+    for (const file of files) {
+      const lowerName = file.name.toLowerCase();
+      const ext = lowerName.split(".").pop();
+      const isZip = ext === "zip";
+      const isOtherArchive = ["rar", "7z", "tar", "gz", "bz2", "xz", "iso", "tgz"].includes(ext);
+      const isImg = isImage(file);
+      const isCodeOrText = isTextFile(file) || ["js", "jsx", "ts", "tsx", "py", "json", "html", "css", "sql", "yaml", "yml", "xml", "md", "txt", "csv", "tsv", "c", "cpp", "h", "rs", "go", "java", "sh", "bat", "ps1", "env", "gitignore"].includes(ext);
+      const isPdf = ext === "pdf" || file.type === "application/pdf";
+
+      // 1. ZIP Archives — Parse central directory in browser and upload
+      if (isZip) {
+        try {
+          const buffer = await file.arrayBuffer();
+          const entries = inspectZipArchive(buffer);
+          await saveFileToWorkspaceUploads(file);
+          let summary = `[Attached Archive: "${file.name}" (${formatFileSize(file.size)}) — Uploaded to workspace: "uploads/${file.name}"]`;
+          if (entries && entries.length > 0) {
+            summary += `\nArchive Contents (${entries.length} items):\n`;
+            summary += entries.slice(0, 45).map(e => `  - ${e.filename} (${formatFileSize(e.size)})`).join("\n");
+            if (entries.length > 45) {
+              summary += `\n  ... and ${entries.length - 45} more files.`;
+            }
+          }
+          setAttachments(prev => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(7),
+              file,
+              type: "archive",
+              name: file.name,
+              content: summary,
+              size: file.size,
+            }
+          ]);
+        } catch (err) {
+          await saveFileToWorkspaceUploads(file);
+          setAttachments(prev => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(7),
+              file,
+              type: "archive",
+              name: file.name,
+              content: `[Attached Archive: "${file.name}" (${formatFileSize(file.size)}) saved to workspace: "uploads/${file.name}"]`,
+              size: file.size,
+            }
+          ]);
+        }
+        continue;
+      }
+
+      // 2. Other Archives (RAR, 7Z, TAR, GZ, etc.) — Upload to workspace & provide context
+      if (isOtherArchive) {
+        await saveFileToWorkspaceUploads(file);
+        setAttachments(prev => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(7),
+            file,
+            type: "archive",
+            name: file.name,
+            content: `[Attached Archive: "${file.name}" (${formatFileSize(file.size)}) saved to workspace: "uploads/${file.name}". You can inspect, unpack, or process it using workspace tools.]`,
+            size: file.size,
+          }
+        ]);
+        continue;
+      }
+
+      // 3. Images
+      if (isImg) {
+        if (supportsVision) {
+          try {
+            const image = await optimizeImageForVision(file);
+            setAttachments(prev => [
               ...prev,
               {
                 id: Math.random().toString(36).substring(7),
@@ -842,58 +977,120 @@ function TextChat({
                 sendDataUrl: image.sendDataUrl,
                 width: image.width,
                 height: image.height,
-                originalWidth: image.originalWidth,
-                originalHeight: image.originalHeight,
-              },
+                size: file.size,
+              }
             ]);
-          })
-          .catch((err) => {
+          } catch (err) {
             showAlert({ title: "Image Error", message: err.message || String(err), danger: true });
-          });
-      } else if (isTextFile(file)) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          setAttachments((prev) => [
+          }
+        } else {
+          // If loaded model does not support vision, attach gracefully with preview & upload
+          await saveFileToWorkspaceUploads(file);
+          const reader = new FileReader();
+          reader.onload = () => {
+            setAttachments(prev => [
+              ...prev,
+              {
+                id: Math.random().toString(36).substring(7),
+                file,
+                type: "image",
+                name: file.name,
+                dataUrl: reader.result,
+                content: `[Attached Image: "${file.name}" (${formatFileSize(file.size)}) saved to workspace: "uploads/${file.name}"]`,
+                size: file.size,
+              }
+            ]);
+          };
+          reader.readAsDataURL(file);
+        }
+        continue;
+      }
+
+      // 4. PDF Documents
+      if (isPdf) {
+        try {
+          const text = await extractPdfText(file);
+          await saveFileToWorkspaceUploads(file);
+          setAttachments(prev => [
             ...prev,
             {
               id: Math.random().toString(36).substring(7),
               file,
               type: "document",
               name: file.name,
-              content: event.target.result,
-            },
-          ]);
-        };
-        reader.readAsText(file);
-      } else if (/\.pdf$/i.test(file.name) || file.type === "application/pdf") {
-        extractPdfText(file)
-          .then((text) => {
-            if (!text.trim()) {
-              throw new Error(`"${file.name}" has no extractable text (it may be a scanned image). Export the pages as images and attach those to a vision model instead.`);
+              content: text.trim() 
+                ? text 
+                : `[Attached PDF Document: "${file.name}" (${formatFileSize(file.size)}) saved to workspace: "uploads/${file.name}"]`,
+              size: file.size,
             }
-            setAttachments((prev) => [
-              ...prev,
-              {
-                id: Math.random().toString(36).substring(7),
-                file,
-                type: "document",
-                name: file.name,
-                content: text,
-              },
-            ]);
-          })
-          .catch((err) => {
-            showAlert({ title: "PDF Error", message: err.message || String(err), danger: true });
-          });
-      } else {
-        showAlert({
-          title: "Unsupported File",
-          message: `File "${file.name}" is not supported. Please select an image (JPEG, PNG, WEBP), a PDF, or a text/code file.`,
-          danger: true,
-        });
+          ]);
+        } catch (err) {
+          await saveFileToWorkspaceUploads(file);
+          setAttachments(prev => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(7),
+              file,
+              type: "document",
+              name: file.name,
+              content: `[Attached PDF Document: "${file.name}" (${formatFileSize(file.size)}) saved to workspace: "uploads/${file.name}"]`,
+              size: file.size,
+            }
+          ]);
+        }
+        continue;
       }
-    });
 
+      // 5. Code & Text files
+      if (isCodeOrText) {
+        try {
+          const text = await file.text();
+          setAttachments(prev => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(7),
+              file,
+              type: "code",
+              name: file.name,
+              content: `[Attached Code/Text File: "${file.name}" (${formatFileSize(file.size)})]\n\`\`\`${ext}\n${text}\n\`\`\``,
+              size: file.size,
+            }
+          ]);
+        } catch (_) {
+          await saveFileToWorkspaceUploads(file);
+          setAttachments(prev => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(7),
+              file,
+              type: "code",
+              name: file.name,
+              content: `[Attached File: "${file.name}" (${formatFileSize(file.size)}) saved to workspace: "uploads/${file.name}"]`,
+              size: file.size,
+            }
+          ]);
+        }
+        continue;
+      }
+
+      // 6. Universal fallback for ANY other file (binaries, audio, video, databases, etc.)
+      await saveFileToWorkspaceUploads(file);
+      setAttachments(prev => [
+        ...prev,
+        {
+          id: Math.random().toString(36).substring(7),
+          file,
+          type: "file",
+          name: file.name,
+          content: `[Attached File: "${file.name}" (${file.type || "binary/data"}, ${formatFileSize(file.size)}) saved to workspace: "uploads/${file.name}"]`,
+          size: file.size,
+        }
+      ]);
+    }
+  };
+
+  const handleFileChange = (e) => {
+    processIncomingFiles(e.target.files);
     e.target.value = "";
   };
 
@@ -1166,13 +1363,13 @@ function TextChat({
       isNew = true;
     }
 
-    // Delimited context blocks for document attachments
+    // Delimited context blocks for document, archive, code, and file attachments
     let documentContext = "";
-    attachments.filter(att => att.type === "document").forEach((att) => {
-      documentContext += `\n[Attached File: ${att.name}]\n${att.content}\n`;
+    attachments.filter(att => att.content).forEach((att) => {
+      documentContext += `\n${att.content}\n`;
     });
 
-    const imageAttachments = attachments.filter(att => att.type === "image");
+    const imageAttachments = attachments.filter(att => att.type === "image" && att.sendDataUrl);
     const conversationHasImage = messages.some(messageContainsImage);
     const requestHasImage = imageAttachments.length > 0 || conversationHasImage;
     const visionInstruction = requestHasImage
@@ -1276,7 +1473,7 @@ function TextChat({
       let thinkingDuration = 0;
 
       const thinkingEnabled = deepThinkEnabled;
-      const manualMaxTokens = textSettings?.maxTokens || 16384;
+      const manualMaxTokens = textSettings?.maxTokens || 32768;
       const effectiveMaxTokens = textSettings?.responseTokenMode === "manual"
         ? (thinkingEnabled ? Math.max(manualMaxTokens, 4096) : manualMaxTokens)
         : getAutoMaxResponseTokens(promptTokenEstimate, thinkingEnabled);
@@ -1774,10 +1971,14 @@ function TextChat({
         <div className="chat-attachments">
           {attachments.map((att) => (
             <div key={att.id} className="chat-attachment">
-              {att.type === "image" ? (
+              {att.type === "image" && att.dataUrl ? (
                 <img src={att.dataUrl} alt="" className="chat-attachment-thumb" />
+              ) : att.type === "archive" ? (
+                <FileArchive size={15} style={{ color: "var(--accent-orange, #ff4b1f)", flexShrink: 0 }} />
+              ) : att.type === "code" ? (
+                <FileCode size={15} style={{ color: "#38bdf8", flexShrink: 0 }} />
               ) : (
-                <FileText size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+                <FileText size={15} aria-hidden="true" style={{ color: "#9ca3af", flexShrink: 0 }} />
               )}
               <span className="chat-attachment-name" title={att.name}>{att.name}</span>
               <button
@@ -2298,12 +2499,71 @@ function TextChat({
   );
 
   return (
-    <div className="text-chat-layout">
+    <div
+      className="text-chat-layout"
+      style={{ position: "relative" }}
+      onDragEnter={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounterRef.current += 1;
+        setIsDraggingOver(true);
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "copy";
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounterRef.current -= 1;
+        if (dragCounterRef.current <= 0) {
+          setIsDraggingOver(false);
+          dragCounterRef.current = 0;
+        }
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounterRef.current = 0;
+        setIsDraggingOver(false);
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          processIncomingFiles(e.dataTransfer.files);
+        }
+      }}
+    >
       <section className="text-chat-main" aria-label="Chat">
+        {isDraggingOver && (
+          <div style={{
+            position: "absolute",
+            inset: "12px",
+            zIndex: 1000,
+            background: "rgba(10, 10, 14, 0.88)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            border: "2px dashed rgba(255, 75, 31, 0.6)",
+            borderRadius: "16px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "12px",
+            pointerEvents: "none",
+            boxShadow: "0 20px 50px rgba(0, 0, 0, 0.6)"
+          }}>
+            <UploadCloud size={38} style={{ color: "var(--accent-orange, #ff4b1f)" }} />
+            <div style={{ fontSize: "16px", fontWeight: 600, color: "#f3f4f6" }}>
+              Drop files here to attach
+            </div>
+            <div style={{ fontSize: "12px", color: "rgba(255, 255, 255, 0.5)" }}>
+              Attach archives (zip, rar, 7z), code, documents, images, audio, or datasets
+            </div>
+          </div>
+        )}
         {loadingModel ? (
           <div className="chat-home">
             <div className="chat-loading">
-              <LoaderCircle className="progress-spinner" size={28} aria-hidden="true" />
+              <LoaderCircle className="abyx-spin" size={24} style={{ color: "var(--accent-orange, #ff4b1f)" }} aria-hidden="true" />
               <h1 className="chat-home-title">Loading model</h1>
               <p className="chat-loading-name">{loadingModel.replace(/\.gguf$/i, "")}</p>
               <p className="chat-loading-note">
@@ -3438,11 +3698,11 @@ export function ImageBlockRenderer({ src, alt, filename }) {
   return (
     <div className="abyx-file-card-wrapper" style={{
       margin: "8px 0",
-      borderRadius: "14px",
+      borderRadius: "12px",
       border: "1px solid rgba(255, 255, 255, 0.08)",
-      background: "#111215",
+      background: "#121215",
       overflow: "hidden",
-      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.25)",
+      boxShadow: "0 2px 8px rgba(0, 0, 0, 0.25)",
       width: "100%",
       maxWidth: "760px"
     }}>
@@ -3450,7 +3710,7 @@ export function ImageBlockRenderer({ src, alt, filename }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "10px 16px",
+        padding: "8px 12px",
         gap: "12px",
         flexWrap: "wrap"
       }}>
@@ -3460,11 +3720,11 @@ export function ImageBlockRenderer({ src, alt, filename }) {
           <div 
             onClick={() => setShowFull(!showFull)}
             style={{
-              width: "38px",
-              height: "38px",
-              borderRadius: "10px",
+              width: "34px",
+              height: "34px",
+              borderRadius: "8px",
               background: "rgba(56, 189, 248, 0.08)",
-              border: "1px solid rgba(56, 189, 248, 0.2)",
+              border: "1px solid rgba(56, 189, 248, 0.18)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -3474,13 +3734,13 @@ export function ImageBlockRenderer({ src, alt, filename }) {
             }}
             title="Click to toggle image preview"
           >
-            <ImageIcon size={18} style={{ color: "#38bdf8" }} />
+            <ImageIcon size={16} style={{ color: "#38bdf8" }} />
           </div>
 
           <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
             <div style={{
-              fontSize: "13px",
-              fontWeight: "600",
+              fontSize: "12.5px",
+              fontWeight: "500",
               color: "#f3f4f6",
               letterSpacing: "-0.01em",
               overflow: "hidden",
@@ -3508,35 +3768,40 @@ export function ImageBlockRenderer({ src, alt, filename }) {
         </div>
 
         {/* Right: Actions */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
           <button
             type="button"
             onClick={handleDownload}
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: "6px",
-              height: "32px",
-              padding: "0 16px",
-              borderRadius: "9999px",
-              background: downloaded ? "#4ade80" : "#ffffff",
-              color: downloaded ? "#052e16" : "#0f172a",
+              gap: "5px",
+              height: "28px",
+              padding: "0 10px",
+              borderRadius: "6px",
+              background: downloaded ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.05)",
+              color: downloaded ? "#4ade80" : "#d1d5db",
               fontSize: "12px",
-              fontWeight: "600",
-              border: "none",
+              fontWeight: "500",
+              border: downloaded ? "1px solid rgba(74, 222, 128, 0.25)" : "1px solid rgba(255, 255, 255, 0.08)",
               cursor: "pointer",
-              transition: "all 0.15s ease",
-              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.2)"
+              transition: "all 0.15s ease"
             }}
             title="Download Image"
             onMouseEnter={(e) => {
-              if (!downloaded) e.currentTarget.style.background = "#e2e8f0";
+              if (!downloaded) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.09)";
+                e.currentTarget.style.color = "#ffffff";
+              }
             }}
             onMouseLeave={(e) => {
-              if (!downloaded) e.currentTarget.style.background = "#ffffff";
+              if (!downloaded) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
+                e.currentTarget.style.color = "#d1d5db";
+              }
             }}
           >
-            {downloaded ? <Check size={13} strokeWidth={2.6} /> : <Download size={13} strokeWidth={2.4} />}
+            {downloaded ? <Check size={12} strokeWidth={2.4} /> : <Download size={12} strokeWidth={2.2} />}
             <span>{downloaded ? "Saved" : "Download"}</span>
           </button>
 
@@ -3547,33 +3812,33 @@ export function ImageBlockRenderer({ src, alt, filename }) {
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: "6px",
-              height: "32px",
-              padding: "0 14px",
-              borderRadius: "9999px",
-              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.06)",
-              color: revealed ? "#4ade80" : "#f1f5f9",
+              gap: "5px",
+              height: "28px",
+              padding: "0 10px",
+              borderRadius: "6px",
+              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.05)",
+              color: revealed ? "#4ade80" : "#d1d5db",
               fontSize: "12px",
               fontWeight: "500",
-              border: revealed ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.12)",
+              border: revealed ? "1px solid rgba(74, 222, 128, 0.25)" : "1px solid rgba(255, 255, 255, 0.08)",
               cursor: revealing ? "wait" : "pointer",
               transition: "all 0.15s ease"
             }}
             title="Reveal in Windows Explorer"
             onMouseEnter={(e) => {
               if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.12)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.09)";
+                e.currentTarget.style.color = "#ffffff";
               }
             }}
             onMouseLeave={(e) => {
               if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.06)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
+                e.currentTarget.style.color = "#d1d5db";
               }
             }}
           >
-            {revealed ? <Check size={13} color="#4ade80" /> : <Folder size={13} />}
+            {revealed ? <Check size={12} color="#4ade80" /> : <Folder size={12} />}
             <span>{revealed ? "Revealed" : revealing ? "Opening..." : "Reveal"}</span>
           </button>
 
@@ -3584,30 +3849,30 @@ export function ImageBlockRenderer({ src, alt, filename }) {
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
-              width: "32px",
-              height: "32px",
-              borderRadius: "9999px",
-              background: showFull ? "rgba(56, 189, 248, 0.15)" : "rgba(255, 255, 255, 0.06)",
-              color: showFull ? "#38bdf8" : "#f1f5f9",
-              border: showFull ? "1px solid rgba(56, 189, 248, 0.3)" : "1px solid rgba(255, 255, 255, 0.12)",
+              width: "28px",
+              height: "28px",
+              borderRadius: "6px",
+              background: showFull ? "rgba(56, 189, 248, 0.12)" : "rgba(255, 255, 255, 0.05)",
+              color: showFull ? "#38bdf8" : "#9ca3af",
+              border: showFull ? "1px solid rgba(56, 189, 248, 0.25)" : "1px solid rgba(255, 255, 255, 0.08)",
               cursor: "pointer",
               transition: "all 0.15s ease"
             }}
             title={showFull ? "Collapse preview" : "View preview"}
             onMouseEnter={(e) => {
               if (!showFull) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.12)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.09)";
+                e.currentTarget.style.color = "#ffffff";
               }
             }}
             onMouseLeave={(e) => {
               if (!showFull) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.06)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
+                e.currentTarget.style.color = "#9ca3af";
               }
             }}
           >
-            <Eye size={14} strokeWidth={2} />
+            <Eye size={13} strokeWidth={2} />
           </button>
         </div>
       </div>
@@ -3746,11 +4011,11 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
   return (
     <div className="abyx-file-card-wrapper" style={{
       margin: "8px 0",
-      borderRadius: "14px",
+      borderRadius: "12px",
       border: "1px solid rgba(255, 255, 255, 0.08)",
-      background: "#111215",
+      background: "#121215",
       overflow: "hidden",
-      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.25)",
+      boxShadow: "0 2px 8px rgba(0, 0, 0, 0.25)",
       width: "100%",
       maxWidth: "760px"
     }}>
@@ -3758,7 +4023,7 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "10px 16px",
+        padding: "8px 12px",
         gap: "12px",
         flexWrap: "wrap"
       }}>
@@ -3768,12 +4033,12 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
             type="button"
             onClick={togglePlay}
             style={{
-              width: "38px",
-              height: "38px",
+              width: "34px",
+              height: "34px",
               borderRadius: "50%",
-              background: isPlaying ? "rgba(34, 197, 94, 0.22)" : "rgba(34, 197, 94, 0.1)",
+              background: isPlaying ? "rgba(34, 197, 94, 0.2)" : "rgba(34, 197, 94, 0.1)",
               color: "#22c55e",
-              border: isPlaying ? "1px solid rgba(34, 197, 94, 0.45)" : "1px solid rgba(34, 197, 94, 0.22)",
+              border: isPlaying ? "1px solid rgba(34, 197, 94, 0.4)" : "1px solid rgba(34, 197, 94, 0.2)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -3783,19 +4048,19 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
             }}
             title={isPlaying ? "Pause" : "Play Kokoro Audio"}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = isPlaying ? "rgba(34, 197, 94, 0.3)" : "rgba(34, 197, 94, 0.18)";
+              e.currentTarget.style.background = isPlaying ? "rgba(34, 197, 94, 0.28)" : "rgba(34, 197, 94, 0.18)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = isPlaying ? "rgba(34, 197, 94, 0.22)" : "rgba(34, 197, 94, 0.1)";
+              e.currentTarget.style.background = isPlaying ? "rgba(34, 197, 94, 0.2)" : "rgba(34, 197, 94, 0.1)";
             }}
           >
-            {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" style={{ marginLeft: "2px" }} />}
+            {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" style={{ marginLeft: "2px" }} />}
           </button>
 
           <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px", flex: 1 }}>
             <div style={{
-              fontSize: "13px",
-              fontWeight: "600",
+              fontSize: "12.5px",
+              fontWeight: "500",
               color: "#f3f4f6",
               letterSpacing: "-0.01em",
               overflow: "hidden",
@@ -3839,35 +4104,40 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
         </div>
 
         {/* Right: Actions */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
           <button
             type="button"
             onClick={handleDownload}
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: "6px",
-              height: "32px",
-              padding: "0 16px",
-              borderRadius: "9999px",
-              background: downloaded ? "#4ade80" : "#ffffff",
-              color: downloaded ? "#052e16" : "#0f172a",
+              gap: "5px",
+              height: "28px",
+              padding: "0 10px",
+              borderRadius: "6px",
+              background: downloaded ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.05)",
+              color: downloaded ? "#4ade80" : "#d1d5db",
               fontSize: "12px",
-              fontWeight: "600",
-              border: "none",
+              fontWeight: "500",
+              border: downloaded ? "1px solid rgba(74, 222, 128, 0.25)" : "1px solid rgba(255, 255, 255, 0.08)",
               cursor: "pointer",
-              transition: "all 0.15s ease",
-              boxShadow: "0 1px 3px rgba(0, 0, 0, 0.2)"
+              transition: "all 0.15s ease"
             }}
             title="Download Audio WAV"
             onMouseEnter={(e) => {
-              if (!downloaded) e.currentTarget.style.background = "#e2e8f0";
+              if (!downloaded) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.09)";
+                e.currentTarget.style.color = "#ffffff";
+              }
             }}
             onMouseLeave={(e) => {
-              if (!downloaded) e.currentTarget.style.background = "#ffffff";
+              if (!downloaded) {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
+                e.currentTarget.style.color = "#d1d5db";
+              }
             }}
           >
-            {downloaded ? <Check size={13} strokeWidth={2.6} /> : <Download size={13} strokeWidth={2.4} />}
+            {downloaded ? <Check size={12} strokeWidth={2.4} /> : <Download size={12} strokeWidth={2.2} />}
             <span>{downloaded ? "Saved" : "Download"}</span>
           </button>
 
@@ -3878,33 +4148,33 @@ export function AudioBlockRenderer({ src, filename, duration, text }) {
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: "6px",
-              height: "32px",
-              padding: "0 14px",
-              borderRadius: "9999px",
-              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.06)",
-              color: revealed ? "#4ade80" : "#f1f5f9",
+              gap: "5px",
+              height: "28px",
+              padding: "0 10px",
+              borderRadius: "6px",
+              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.05)",
+              color: revealed ? "#4ade80" : "#d1d5db",
               fontSize: "12px",
               fontWeight: "500",
-              border: revealed ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.12)",
+              border: revealed ? "1px solid rgba(74, 222, 128, 0.25)" : "1px solid rgba(255, 255, 255, 0.08)",
               cursor: revealing ? "wait" : "pointer",
               transition: "all 0.15s ease"
             }}
             title="Reveal in Windows Explorer"
             onMouseEnter={(e) => {
               if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.12)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.09)";
+                e.currentTarget.style.color = "#ffffff";
               }
             }}
             onMouseLeave={(e) => {
               if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.06)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
+                e.currentTarget.style.color = "#d1d5db";
               }
             }}
           >
-            {revealed ? <Check size={13} color="#4ade80" /> : <Folder size={13} />}
+            {revealed ? <Check size={12} color="#4ade80" /> : <Folder size={12} />}
             <span>{revealed ? "Revealed" : revealing ? "Opening..." : "Reveal"}</span>
           </button>
         </div>
@@ -3961,12 +4231,12 @@ export function MarkdownRenderer({ content, onOpenBrowser, isComplete = true, us
   if (typeof content !== 'string') return null;
 
   const pLower = (userPrompt || "").toLowerCase();
-  const isAudioIntent = /\b(?:generate|create|make|produce|synthesize|record|convert|turn)\s+(?:both\s+)?(?:an?\s+)?(?:audio|speech|voice|podcast|voiceover|narration|sound\s+clip|recording|spoken\s+word)\b|\b(?:convert|turn)\s+(?:[\w\s]{1,30})?\s*into\s+(?:an?\s+)?(?:audio|speech|voice|podcast)\b|\b(?:read\s+.*aloud|narrate|speak\s+this|speak\s+out\s+loud|text\s*to\s*speech|tts)\b/i.test(pLower);
-  const isImageIntent = /\b(?:generate|create|make|draw|paint|render|illustrate|produce|design)\s+(?:both\s+)?(?:an?\s+)?(?:image|photo|picture|drawing|illustration|artwork|wallpaper|portrait|graphic|banner|logo|avatar|visual)\b|\b(?:draw\s+me|paint\s+me)\b/i.test(pLower);
-  const asksBoth = (isAudioIntent && isImageIntent) || /\b(?:image\s+and\s+audio|audio\s+and\s+image|both\s+(?:an?\s+)?image\s+and\s+(?:an?\s+)?audio|picture\s+and\s+voice)\b/i.test(pLower);
+  const hasAudioWords = /\b(?:audio|speech|voice|podcast|voiceover|narration|sound\s*clip|recording|spoken\s*word|speak|read\s*aloud|narrate|tts|text\s*to\s*speech)\b/i.test(pLower);
+  const hasImageWords = /\b(?:image|photo|picture|drawing|illustration|artwork|wallpaper|portrait|graphic|banner|logo|avatar|visual|draw|paint|sketch)\b/i.test(pLower);
+  const asksBoth = (hasAudioWords && hasImageWords) || /\b(?:image\s+and\s+audio|audio\s+and\s+image|both\s+(?:an?\s+)?image\s+and\s+(?:an?\s+)?audio|picture\s+and\s+voice)\b/i.test(pLower);
 
-  const audioOnly = (isAudioIntent && !isImageIntent) && !asksBoth;
-  const imageOnly = (isImageIntent && !isAudioIntent) && !asksBoth;
+  const audioOnly = (hasAudioWords && !hasImageWords) && !asksBoth;
+  const imageOnly = (hasImageWords && !hasAudioWords) && !asksBoth;
 
   const normalizedContent = ensureFencedCode(content);
   const parts = normalizedContent.split(/(```[\s\S]*?```|\[AUDIO:\s*[\s\S]*?\]|\[IMAGE:\s*[\s\S]*?\]|\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\])/gi);

@@ -4554,18 +4554,9 @@ function chooseAutoContext(modelFilename, isGpu) {
   } catch (_) {}
 
   const lowerFilename = String(modelFilename || "").toLowerCase();
-  // For Abyx models, calibrate context size directly to physical VRAM so 100% of KV cache fits in GPU VRAM
+  // Abyx 9B natively supports 262,144 tokens (260k context)
   if (lowerFilename.includes("abyx")) {
-    let vramGb = 0;
-    try {
-      const gpu = getGpuInfo();
-      if (gpu && gpu.vram_gb) vramGb = gpu.vram_gb;
-    } catch (_) {}
-    if (isGpu && vramGb > 0) {
-      if (vramGb <= 8.5) return 32768; // 8GB laptop GPU (e.g. RTX 5060/4060): 32k tokens fits 100% in VRAM with q4_0 KV cache
-      if (vramGb <= 16) return 65536;  // 12-16GB GPU: 64k tokens
-      return 131072;                   // 24GB+ GPU: 128k+ tokens
-    }
+    return 262144;
   }
   const isVisionModel = isVisionModelFilename(lowerFilename);
   let projectorSizeGb = 0;
@@ -4850,12 +4841,17 @@ async function startLlmWithBackend(settings = {}, backend) {
 
   const isSyclBackend = backend.mode.includes("SYCL") || path.basename(path.dirname(backend.path)).toLowerCase() === "sycl";
   const requestedGpuLayers = Number.isFinite(Number(loadProfile.gpuLayers ?? settings.gpuLayers)) ? Number(loadProfile.gpuLayers ?? settings.gpuLayers) : -1;
-  const effectiveGpuLayers = isSyclBackend ? getStableSyclGpuLayers(filename, requestedGpuLayers) : requestedGpuLayers;
-  const effectiveFlashAttn = isSyclBackend ? false : (loadProfile.flashAttn ?? (settings.flashAttn !== false));
   const isSmallGpu = isGpu && (getGpuInfo()?.vram_gb || 0) <= 8.5;
-  const fallbackCacheType = (lowerFilename.includes("abyx") || isSmallGpu) ? "q4_0" : "q8_0";
-  const effectiveCacheTypeK = isSyclBackend ? "q4_0" : loadProfile.cacheTypeK || settings.cacheTypeK || fallbackCacheType;
-  const effectiveCacheTypeV = isSyclBackend ? "q4_0" : loadProfile.cacheTypeV || settings.cacheTypeV || fallbackCacheType;
+  const isAbyxModel = lowerFilename.includes("abyx");
+  const isInklingModel = lowerFilename.includes("inkling");
+  let effectiveGpuLayers = isSyclBackend ? getStableSyclGpuLayers(filename, requestedGpuLayers) : requestedGpuLayers;
+  if (!isSyclBackend && isSmallGpu && requestedGpuLayers === -1 && isInklingModel) {
+    effectiveGpuLayers = 14;
+  }
+  const effectiveFlashAttn = isSyclBackend ? false : (loadProfile.flashAttn ?? (settings.flashAttn !== false));
+  const fallbackCacheType = (isAbyxModel || isInklingModel || isSmallGpu) ? "q4_0" : "q8_0";
+  const effectiveCacheTypeK = (isSyclBackend || isAbyxModel || isInklingModel) ? "q4_0" : (settings.cacheTypeK || loadProfile.cacheTypeK || fallbackCacheType);
+  const effectiveCacheTypeV = (isSyclBackend || isAbyxModel || isInklingModel) ? "q4_0" : (settings.cacheTypeV || loadProfile.cacheTypeV || fallbackCacheType);
   const effectiveBatchSize = isSyclBackend ? Math.min(256, Number(loadProfile.batchSize ?? settings.batchSize) || llmSettings.batchSize || 512) : Number(loadProfile.batchSize ?? settings.batchSize) || llmSettings.batchSize || 512;
   const effectiveUbatchSize = isSyclBackend ? Math.min(256, Number(loadProfile.ubatchSize ?? settings.ubatchSize) || llmSettings.ubatchSize || 512) : Number(loadProfile.ubatchSize ?? settings.ubatchSize) || llmSettings.ubatchSize || 512;
   const effectiveEnableThinking = isSyclBackend && effectiveGpuLayers === 0 ? false : (loadProfile.enableThinking ?? (settings.enableThinking === true));
@@ -4871,7 +4867,7 @@ async function startLlmWithBackend(settings = {}, backend) {
     backendBinary: path.basename(backend.path),
     loadProfile: loadProfile.name || "requested",
     enableThinking: effectiveEnableThinking,
-    supportsThinking: /deepseek|qwen|gemma-4|gemma4|think|r1|e2b|reasoning|abyx/i.test(filename),
+    supportsThinking: /deepseek|qwen|gemma-4|gemma4|think|r1|e2b|reasoning|abyx|inkling/i.test(filename),
     // New performance settings
     flashAttn: effectiveFlashAttn,
     cacheTypeK: effectiveCacheTypeK,
@@ -7607,17 +7603,28 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
   const createdMedia = [];
 
   // Precision intent classification for media generation
-  const isAudioIntent = /\b(?:generate|create|make|produce|synthesize|record|convert|turn)\s+(?:both\s+)?(?:an?\s+)?(?:audio|speech|voice|podcast|voiceover|narration|sound\s+clip|recording|spoken\s+word)\b|\b(?:convert|turn)\s+(?:[\w\s]{1,30})?\s*into\s+(?:an?\s+)?(?:audio|speech|voice|podcast)\b|\b(?:read\s+.*aloud|narrate|speak\s+this|speak\s+out\s+loud|text\s*to\s*speech|tts)\b/i.test(pLower);
-  const isImageIntent = /\b(?:generate|create|make|draw|paint|render|illustrate|produce|design)\s+(?:both\s+)?(?:an?\s+)?(?:image|photo|picture|drawing|illustration|artwork|wallpaper|portrait|graphic|banner|logo|avatar|visual)\b|\b(?:draw\s+me|paint\s+me)\b/i.test(pLower);
-  const asksBoth = (isAudioIntent && isImageIntent) || /\b(?:image\s+and\s+audio|audio\s+and\s+image|both\s+(?:an?\s+)?image\s+and\s+(?:an?\s+)?audio|picture\s+and\s+voice)\b/i.test(pLower);
+  const hasAudioWords = /\b(?:audio|speech|voice|podcast|voiceover|narration|sound\s*clip|recording|spoken\s*word|speak|read\s*aloud|narrate|tts|text\s*to\s*speech)\b/i.test(pLower);
+  const hasImageWords = /\b(?:image|photo|picture|drawing|illustration|artwork|wallpaper|portrait|graphic|banner|logo|avatar|visual|draw|paint|sketch)\b/i.test(pLower);
+  const asksBoth = (hasAudioWords && hasImageWords) || /\b(?:image\s+and\s+audio|audio\s+and\s+image|both\s+(?:an?\s+)?image\s+and\s+(?:an?\s+)?audio|picture\s+and\s+voice)\b/i.test(pLower);
 
-  const allowAudio = isAudioIntent || asksBoth;
-  const allowImage = (isImageIntent || asksBoth) && !(!asksBoth && isAudioIntent);
-  const isAudioOnly = allowAudio && !allowImage;
+  const isAudioOnly = hasAudioWords && !hasImageWords && !asksBoth;
+  const isImageOnly = hasImageWords && !hasAudioWords && !asksBoth;
+
+  const allowAudio = (hasAudioWords || asksBoth) && !isImageOnly;
+  const allowImage = (hasImageWords || asksBoth) && !isAudioOnly;
   const allowHtmlImageDirectives = !isAudioOnly && (allowImage || /\b(?:html|website|webpage|page|app|web\s+app|game)\b/i.test(pLower));
 
-  // Helper with 25s safety timeout to allow complete multi-sentence Kokoro audio synthesis
-  const withTimeout = (promise, ms = 25000) => Promise.race([
+  // If user only asked for audio, strictly purge rogue image tags
+  if (isAudioOnly) {
+    text = text.replace(/\[IMAGE:\s*[\s\S]*?\]/gi, "").replace(/<img[^>]*data-generate[^>]*>/gi, "");
+  }
+  // If user only asked for image, strictly purge rogue audio tags
+  if (isImageOnly) {
+    text = text.replace(/\[AUDIO:\s*[\s\S]*?\]/gi, "");
+  }
+
+  // Helper with 12s safety timeout to prevent hanging SSE streams
+  const withTimeout = (promise, ms = 12000) => Promise.race([
     promise,
     new Promise(resolve => setTimeout(() => {
       console.warn(`[AGENTIC WORKSPACE] Media generation operation timed out after ${ms}ms`);
@@ -7685,7 +7692,6 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
   createdFiles.files = createdFiles;
   createdFiles.media = createdMedia;
   return createdFiles;
-  return createdFiles;
 }
 
 async function augmentMessagesWithWebSearch(messages, body) {
@@ -7735,7 +7741,7 @@ async function doLlmChat(req, res, body, retryCount = 0, routedModelInfo = null)
       model: llmSettings.model || "local-model",
       messages: webAugmentation.messages,
       temperature: Number.isFinite(Number(body.temperature)) ? Number(body.temperature) : 0.7,
-      max_tokens: Math.max(1, Math.min(32768, Number(body.max_tokens) || Number(body.maxTokens) || 16384)),
+      max_tokens: Math.max(1, Math.min(131072, Number(body.max_tokens) || Number(body.maxTokens) || 32768)),
       stream: isStream,
       // New sampling parameters
       top_p: Number.isFinite(Number(body.top_p)) ? Number(body.top_p) : 0.95,
@@ -7823,6 +7829,11 @@ async function doLlmChat(req, res, body, retryCount = 0, routedModelInfo = null)
           }
         });
         clientRes.on("end", async () => {
+          const keepAlive = setInterval(() => {
+            if (!res.writableEnded) {
+              try { res.write(": keep-alive\n\n"); } catch (_) {}
+            }
+          }, 1500);
           try {
             if (localResponseAccumulator) {
               try {
@@ -7881,6 +7892,7 @@ async function doLlmChat(req, res, body, retryCount = 0, routedModelInfo = null)
               } catch (_) {}
             }
           } finally {
+            clearInterval(keepAlive);
             if (!res.writableEnded) {
               res.write("data: [DONE]\n\n");
               res.end();
@@ -8184,9 +8196,11 @@ async function getLlmfitRecommendations(useCase = "chat", limit = 10) {
     const lastPromptLower = lastUserPrompt.toLowerCase();
 
     // High-precision intent classification to save prompt tokens and eliminate hallucinated cross-media
-    const isAudioIntent = /\b(?:generate|create|make|produce|synthesize|record|convert|turn)\s+(?:both\s+)?(?:an?\s+)?(?:audio|speech|voice|podcast|voiceover|narration|sound\s+clip|recording|spoken\s+word)\b|\b(?:convert|turn)\s+(?:[\w\s]{1,30})?\s*into\s+(?:an?\s+)?(?:audio|speech|voice|podcast)\b|\b(?:read\s+.*aloud|narrate|speak\s+this|speak\s+out\s+loud|text\s*to\s*speech|tts)\b/i.test(lastPromptLower);
-    const isImageIntent = /\b(?:generate|create|make|draw|paint|render|illustrate|produce|design)\s+(?:both\s+)?(?:an?\s+)?(?:image|photo|picture|drawing|illustration|artwork|wallpaper|portrait|graphic|banner|logo|avatar|visual)\b|\b(?:draw\s+me|paint\s+me)\b/i.test(lastPromptLower);
-    const asksBoth = (isAudioIntent && isImageIntent) || /\b(?:image\s+and\s+audio|audio\s+and\s+image|both\s+(?:an?\s+)?image\s+and\s+(?:an?\s+)?audio|picture\s+and\s+voice)\b/i.test(lastPromptLower);
+    const hasAudioWords = /\b(?:audio|speech|voice|podcast|voiceover|narration|sound\s*clip|recording|spoken\s*word|speak|read\s*aloud|narrate|tts|text\s*to\s*speech)\b/i.test(lastPromptLower);
+    const hasImageWords = /\b(?:image|photo|picture|drawing|illustration|artwork|wallpaper|portrait|graphic|banner|logo|avatar|visual|draw|paint|sketch)\b/i.test(lastPromptLower);
+    const asksBoth = (hasAudioWords && hasImageWords) || /\b(?:image\s+and\s+audio|audio\s+and\s+image|both\s+(?:an?\s+)?image\s+and\s+(?:an?\s+)?audio|picture\s+and\s+voice)\b/i.test(lastPromptLower);
+    const isAudioIntent = hasAudioWords && !hasImageWords && !asksBoth;
+    const isImageIntent = hasImageWords && !hasAudioWords && !asksBoth;
     const asksWebOrApp = /\b(?:html|website|webpage|page|app|web\s+app|game)\b/i.test(lastPromptLower);
 
     let skillsContext = "";
@@ -8356,35 +8370,23 @@ ${skillsContext}`;
         },
         onFinish: async () => {
           if (!res.writableEnded) {
-            if (cloudResponseAccumulator) {
-              try {
-                const lastPrompt = [...normalizedMessages].reverse().find(m => m.role === 'user')?.content || "";
-                const savedFiles = await autoExtractAndSaveCode(cloudResponseAccumulator, lastPrompt, activeWs);
-                const savedMedia = savedFiles?.media || [];
-                if (savedFiles && savedFiles.length > 0) {
-                  for (const sf of savedFiles) {
-                    let note = `\n\n> Workspace file created: \`${sf.relativePath}\` (${sf.size} bytes) • [Download](/api/files/download?path=${encodeURIComponent(sf.relativePath)})`;
-                    if (sf.isHtml) {
-                      note += ` • [Preview in Browser](action:preview?file=${encodeURIComponent(sf.relativePath)})`;
-                    }
-                    res.write(`data: ${JSON.stringify({
-                      choices: [{ delta: { content: note } }],
-                      text: note,
-                      content: note
-                    })}\n\n`);
-                  }
-                }
-                if (savedMedia && savedMedia.length > 0) {
-                  for (const m of savedMedia) {
-                    if (m.type === 'image') {
-                      let note = `\n\n![${m.prompt}](${m.url})\n> Photo generated: \`${m.relativePath}\` • [Download](/api/files/download?path=${encodeURIComponent(m.relativePath)})`;
-                      res.write(`data: ${JSON.stringify({
-                        choices: [{ delta: { content: note } }],
-                        text: note,
-                        content: note
-                      })}\n\n`);
-                    } else if (m.type === 'audio') {
-                      let note = `\n\n[AUDIO: src="${m.url}" name="${m.filename}" duration="${Math.round((m.durationMs || 3000)/1000)}s" text="${encodeURIComponent(m.text || '')}"]\n> Audio generated: \`${m.relativePath}\` • [Download](/api/files/download?path=${encodeURIComponent(m.relativePath)})`;
+            const keepAlive = setInterval(() => {
+              if (!res.writableEnded) {
+                try { res.write(": keep-alive\n\n"); } catch (_) {}
+              }
+            }, 1500);
+            try {
+              if (cloudResponseAccumulator) {
+                try {
+                  const lastPrompt = [...normalizedMessages].reverse().find(m => m.role === 'user')?.content || "";
+                  const savedFiles = await autoExtractAndSaveCode(cloudResponseAccumulator, lastPrompt, activeWs);
+                  const savedMedia = savedFiles?.media || [];
+                  if (savedFiles && savedFiles.length > 0) {
+                    for (const sf of savedFiles) {
+                      let note = `\n\n> Workspace file created: \`${sf.relativePath}\` (${sf.size} bytes) • [Download](/api/files/download?path=${encodeURIComponent(sf.relativePath)})`;
+                      if (sf.isHtml) {
+                        note += ` • [Preview in Browser](action:preview?file=${encodeURIComponent(sf.relativePath)})`;
+                      }
                       res.write(`data: ${JSON.stringify({
                         choices: [{ delta: { content: note } }],
                         text: note,
@@ -8392,13 +8394,36 @@ ${skillsContext}`;
                       })}\n\n`);
                     }
                   }
+                  if (savedMedia && savedMedia.length > 0) {
+                    for (const m of savedMedia) {
+                      if (m.type === 'image') {
+                        let note = `\n\n![${m.prompt}](${m.url})\n> Photo generated: \`${m.relativePath}\` • [Download](/api/files/download?path=${encodeURIComponent(m.relativePath)})`;
+                        res.write(`data: ${JSON.stringify({
+                          choices: [{ delta: { content: note } }],
+                          text: note,
+                          content: note
+                        })}\n\n`);
+                      } else if (m.type === 'audio') {
+                        let note = `\n\n[AUDIO: src="${m.url}" name="${m.filename}" duration="${Math.round((m.durationMs || 3000)/1000)}s" text="${encodeURIComponent(m.text || '')}"]\n> Audio generated: \`${m.relativePath}\` • [Download](/api/files/download?path=${encodeURIComponent(m.relativePath)})`;
+                        res.write(`data: ${JSON.stringify({
+                          choices: [{ delta: { content: note } }],
+                          text: note,
+                          content: note
+                        })}\n\n`);
+                      }
+                    }
+                  }
+                } catch (saveErr) {
+                  console.warn("[AGENTIC WORKSPACE] Cloud post-save error:", saveErr.message);
                 }
-              } catch (saveErr) {
-                console.warn("[AGENTIC WORKSPACE] Cloud post-save error:", saveErr.message);
+              }
+            } finally {
+              clearInterval(keepAlive);
+              if (!res.writableEnded) {
+                res.write('data: [DONE]\n\n');
+                res.end();
               }
             }
-            res.write('data: [DONE]\n\n');
-            res.end();
           }
         }
       });
@@ -8914,8 +8939,16 @@ ${skillsContext}`;
       const targetDir = subfolder ? path.join(wsDir, subfolder) : wsDir;
       const filePath = path.join(targetDir, filename);
 
+      const encoding = String(body.encoding || "utf8").toLowerCase();
+      let fileBuffer;
+      if (encoding === "base64") {
+        fileBuffer = Buffer.from(content, "base64");
+      } else {
+        fileBuffer = Buffer.from(content, "utf8");
+      }
+
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, content, "utf8");
+      fs.writeFileSync(filePath, fileBuffer);
       const stat = fs.statSync(filePath);
 
       return json(res, 200, {
@@ -9193,8 +9226,16 @@ ${skillsContext}`;
       const targetDir = subfolder ? path.join(wsDir, subfolder) : wsDir;
       const filePath = path.join(targetDir, filename);
 
+      const encoding = String(body.encoding || "utf8").toLowerCase();
+      let fileBuffer;
+      if (encoding === "base64") {
+        fileBuffer = Buffer.from(content, "base64");
+      } else {
+        fileBuffer = Buffer.from(content, "utf8");
+      }
+
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, content, "utf8");
+      fs.writeFileSync(filePath, fileBuffer);
       const stat = fs.statSync(filePath);
 
       return json(res, 200, {
