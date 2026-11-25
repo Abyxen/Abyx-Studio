@@ -2303,11 +2303,11 @@ export async function getActiveOrchestrations() {
   return await readJsonResponse(res, "Failed to fetch active orchestrations.");
 }
 
-export async function streamOrchestration({ goal, model, concurrency, tasks, onEvent, signal }) {
+export async function streamOrchestration({ goal, model, concurrency, tasks, harnessOverrides, onEvent, signal }) {
   const res = await fetch("/api/orchestrator/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ goal, model, concurrency, tasks }),
+    body: JSON.stringify({ goal, model, concurrency, tasks, harnessOverrides }),
     signal
   });
 
@@ -2360,6 +2360,40 @@ export async function streamOrchestration({ goal, model, concurrency, tasks, onE
   }
 
   return { ok: true };
+}
+
+export async function getOrchestratorHistory() {
+  const res = await fetch("/api/orchestrator/history");
+  return await readJsonResponse(res, "Failed to fetch orchestrator history.");
+}
+
+export async function getOrchestratorRun(runId) {
+  const res = await fetch(`/api/orchestrator/runs/${encodeURIComponent(runId)}`);
+  return await readJsonResponse(res, "Failed to fetch orchestrator run.");
+}
+
+export async function getOrchestratorEvents(runId) {
+  const res = await fetch(`/api/orchestrator/events/${encodeURIComponent(runId)}`);
+  return await readJsonResponse(res, "Failed to fetch orchestrator events.");
+}
+
+export async function getOrchestratorSettings() {
+  const res = await fetch("/api/orchestrator/settings");
+  return await readJsonResponse(res, "Failed to fetch orchestrator settings.");
+}
+
+export async function updateOrchestratorSettings(settings) {
+  const res = await fetch("/api/orchestrator/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  return await readJsonResponse(res, "Failed to update orchestrator settings.");
+}
+
+export async function getOrchestratorHealth() {
+  const res = await fetch("/api/orchestrator/health");
+  return await readJsonResponse(res, "Failed to fetch orchestrator health.");
 }
 
 

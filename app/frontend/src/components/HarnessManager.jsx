@@ -557,7 +557,7 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
       {/* TAB 0: MULTI-AGENT SWARM & ORCHESTRATION (12 AGENTS)     */}
       {/* ======================================================== */}
       {activeTab === "multiagent" && (
-        <div style={{ marginTop: 8, height: "calc(100vh - 220px)" }}>
+        <div style={{ marginTop: 4, height: "calc(100vh - 130px)", flex: 1, display: "flex", flexDirection: "column" }}>
           <MultiAgentWorkspace activeProject={activeProject} onOpenFile={openWorkspacePath} />
         </div>
       )}

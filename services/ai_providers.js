@@ -1557,7 +1557,16 @@ async function streamProviderChat({ model, modelId, messages, temperature, max_t
   return { content: fullText, reasoning: fullReasoning, usage: streamUsage };
 }
 
+const ModelRouter = require('../agent/model_router');
+const defaultModelRouter = new ModelRouter();
+
+async function generateResponse(params) {
+  return await defaultModelRouter.generateResponse(params);
+}
+
 module.exports = {
+  generateResponse,
+  defaultModelRouter,
   PROVIDER_METADATA,
   loadStoredConfig,
   saveStoredConfig,

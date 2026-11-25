@@ -129,6 +129,13 @@ class AgentSharedMemory {
   }
 
   /**
+   * Alias for listFindings
+   */
+  getAllFindings() {
+    return [...this.findings];
+  }
+
+  /**
    * Get/set shared variables
    */
   setVariable(key, value) {

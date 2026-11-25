@@ -142,4 +142,8 @@ function clearProfileCache(profileId) {
   for (const key of secretCache.keys()) if (key.startsWith(`${profileId}:`)) secretCache.delete(key);
 }
 
-module.exports = { storeSecret, getSecret, removeSecret, clearProfileCache, decryptSecret, encryptSecret };
+function getApiKey(providerId, profileId = 'prof_default') {
+  return getSecret(profileId, providerId);
+}
+
+module.exports = { storeSecret, getSecret, getApiKey, removeSecret, clearProfileCache, decryptSecret, encryptSecret };

@@ -17,6 +17,9 @@ const AgentMessageBus = require('./message_bus');
 const WorkspaceIsolationManager = require('./workspace_isolation');
 const TaskVerifier = require('./verifier');
 const AgentSharedMemory = require('./shared_memory');
+const EventStore = require('./event_store');
+const TaskStore = require('./task_store');
+const ModelRouter = require('./model_router');
 const ExecutionLogger = require('./execution_logger');
 const types = require('./types');
 const { ToolRegistry } = require('./tool_registry');
@@ -167,6 +170,9 @@ module.exports = {
   WorkspaceIsolationManager,
   TaskVerifier,
   AgentSharedMemory,
+  EventStore,
+  TaskStore,
+  ModelRouter,
   PathGuard,
   PolicyEngine,
   WorkspaceFsTool,

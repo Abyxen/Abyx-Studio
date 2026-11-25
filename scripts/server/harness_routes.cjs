@@ -119,6 +119,9 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
       if (typeof updateLlmSettings === "function") {
         updateLlmSettings(updates);
       }
+      if (aiProviders?.defaultModelRouter?.updateHarnessSettings) {
+        aiProviders.defaultModelRouter.updateHarnessSettings(updates);
+      }
 
       if (body.restartLlm === true && typeof startLlm === "function" && current.model) {
         try {
@@ -191,6 +194,19 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
       const sessionId = typeof body.sessionId === "string" ? body.sessionId : `orch_${Date.now()}`;
       const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
 
+      const harnessOverrides = body.harnessOverrides || {
+        temperature: body.temperature,
+        contextSize: body.contextSize,
+        maxResponseTokens: body.maxResponseTokens,
+        seed: body.seed,
+        performanceProfile: body.performanceProfile,
+        textBackend: body.textBackend,
+        cpuThreads: body.cpuThreads,
+        gpuLayers: body.gpuLayers,
+        batchSize: body.batchSize,
+        kvCache: body.kvCache
+      };
+
       const clientAbort = new AbortController();
       const abortOnDisconnect = () => {
         if (!res.writableEnded) clientAbort.abort(new Error("Client disconnected"));
@@ -207,6 +223,7 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
         model: requestedModel,
         concurrency,
         customTasks: Array.isArray(body.tasks) ? body.tasks : null,
+        harnessOverrides,
         profileId,
         sessionId,
         signal: clientAbort.signal,
@@ -245,6 +262,61 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
     const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
     const active = Array.from(runtime.orchestrator.activeOrchestrations.keys());
     return json(res, 200, { ok: true, activeRuns: active });
+  }
+
+  // GET /api/orchestrator/history
+  if (req.method === "GET" && pathname === "/api/orchestrator/history") {
+    const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
+    const history = runtime.orchestrator.taskStore ? runtime.orchestrator.taskStore.listOrchestrations(50) : [];
+    return json(res, 200, { ok: true, history });
+  }
+
+  // GET /api/orchestrator/runs/:runId
+  if (req.method === "GET" && pathname.startsWith("/api/orchestrator/runs/")) {
+    const runId = pathname.replace("/api/orchestrator/runs/", "").trim();
+    const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
+    const run = runtime.orchestrator.taskStore ? runtime.orchestrator.taskStore.getOrchestration(runId) : null;
+    if (!run) return json(res, 404, { ok: false, error: "Run not found" });
+    return json(res, 200, { ok: true, run });
+  }
+
+  // GET /api/orchestrator/events/:runId
+  if (req.method === "GET" && pathname.startsWith("/api/orchestrator/events/")) {
+    const runId = pathname.replace("/api/orchestrator/events/", "").trim();
+    const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
+    const events = runtime.orchestrator.eventStore ? runtime.orchestrator.eventStore.query({ runId }) : [];
+    return json(res, 200, { ok: true, events });
+  }
+
+  // GET /api/orchestrator/settings
+  if (req.method === "GET" && pathname === "/api/orchestrator/settings") {
+    const settings = aiProviders?.defaultModelRouter?.getHarnessSettings?.() || {};
+    return json(res, 200, { ok: true, settings });
+  }
+
+  // POST /api/orchestrator/settings
+  if (req.method === "POST" && pathname === "/api/orchestrator/settings") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      const updated = aiProviders?.defaultModelRouter?.updateHarnessSettings?.(body) || body;
+      return json(res, 200, { ok: true, settings: updated });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // GET /api/orchestrator/health
+  if (req.method === "GET" && pathname === "/api/orchestrator/health") {
+    try {
+      if (aiProviders?.defaultModelRouter?.checkHealth) {
+        const health = await aiProviders.defaultModelRouter.checkHealth();
+        return json(res, 200, { ok: true, ...health });
+      }
+      return json(res, 200, { ok: true, online: true, note: "Provider active" });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
   }
 
   // ==========================================
