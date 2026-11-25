@@ -386,7 +386,7 @@ export default function SecondBrainAbout() {
                   <span>Bounded Workspaces</span>
                 </div>
                 <div style={{ fontSize: "0.78rem", color: "var(--md-sys-color-outline)" }}>
-                  PathGuard sandbox strictly restricts file modifications to active project.
+              Path checks restrict agent file operations to the active project; they are not an operating-system sandbox.
                 </div>
               </div>
 

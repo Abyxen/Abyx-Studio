@@ -9,6 +9,7 @@
  */
 
 const { ExtensionKind, VALID_PERMISSIONS } = require('./types');
+const { validateSchemaDefinition } = require('../agent/tool_registry');
 
 const ID_REGEX = /^[a-z0-9_-]{2,64}$/;
 const SEMVER_REGEX = /^\d+\.\d+\.\d+(-[a-zA-Z0-9._]+)?$/;
@@ -89,6 +90,10 @@ class ManifestValidator {
       }
     }
 
+    const dependencies = Array.isArray(rawManifest.dependencies) ? [...new Set(rawManifest.dependencies.map(value => String(value).trim().toLowerCase()))] : [];
+    if (dependencies.length > 32 || dependencies.some(value => !ID_REGEX.test(value))) throw new Error('Skill dependencies must be a bounded list of valid skill IDs');
+    if (kind !== ExtensionKind.SKILL && dependencies.length) throw new Error('Only instruction skills may declare skill dependencies');
+
     // 7. Entry Point Validation
     let entryPoint = null;
     if (kind === ExtensionKind.PLUGIN) {
@@ -123,11 +128,17 @@ class ManifestValidator {
     // 8. Tool definitions for plugins
     let tools = [];
     if (Array.isArray(rawManifest.tools)) {
-      tools = rawManifest.tools.map(t => ({
-        name: String(t.name || '').slice(0, 64),
-        description: String(t.description || '').slice(0, 200),
-        parameters: t.parameters || {}
-      })).filter(t => t.name);
+      if (kind !== ExtensionKind.PLUGIN || rawManifest.tools.length > 128) throw new Error('Tool definitions are only supported for bounded plugin manifests');
+      const names = new Set();
+      tools = rawManifest.tools.map(tool => {
+        if (!tool || typeof tool !== 'object' || Array.isArray(tool)) throw new Error('Plugin tool definition must be an object');
+        const toolName = typeof tool.name === 'string' ? tool.name.trim() : '';
+        if (!/^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/.test(toolName) || names.has(toolName)) throw new Error('Plugin tool names must be valid and unique');
+        names.add(toolName);
+        const parameters = tool.parameters || { type: 'object', properties: {} };
+        validateSchemaDefinition(parameters, `plugin tool ${toolName} parameters`);
+        return { name: toolName, description: String(tool.description || '').slice(0, 200), parameters };
+      });
     }
 
     return {
@@ -139,6 +150,7 @@ class ManifestValidator {
       author,
       entryPoint,
       permissions: requestedPermissions,
+      dependencies,
       tools,
       category: rawManifest.category || 'General'
     };

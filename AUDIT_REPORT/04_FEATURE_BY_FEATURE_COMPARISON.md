@@ -1,0 +1,22 @@
+# Feature-by-Feature Comparison
+
+The matrix compares documented/source-visible capabilities, not benchmark superiority. `OpenCode` and `Pi` rows cite official repositories/docs in 22; Abyx paths are local.
+
+| Area | OpenCode | Pi | DeepSeek Harness | Abyx current state | Relative gap |
+|---|---|---|---|---|---|
+| Runtime structure | Integrated product packages/services, client/server and ACP surfaces | Separate reusable API/core/coding-agent/TUI packages | Cordis contexts, profile/bundle plugin tree | Node server plus parallel legacy chat, agent and harness loops | Unify execution and state contracts; avoid copying all three structures. |
+| Agent execution | Session-bound loop, agent roles and tool flow | Minimal agent loop with extensible events and modes | Loop/model/tool/session/UI composable as plugins | Two loops, JSON-action versus native tool-call protocol | One canonical loop with provider-neutral structured tool protocol. |
+| Providers | Broad provider integrations and model catalog | Unified LLM API/provider package and model switching | Adapter plugin and DeepSeek-first deployment | Registry/adapters plus AI routing/failover | Normalize capabilities, streaming, errors, context limits, and model metadata. |
+| Tools | Built-ins, custom tools, MCP; configurable allow/ask/deny | Built-ins plus runtime extensions and custom tools | Tool registry and plugins; MCP bridge | tools spread across agent tools and consumer plugin; different policy paths | Central registry, schemas, lifecycle, permissions and cancellation. |
+| Session/context | Persistent sessions, fork/resume, compaction and protocol support | File sessions, branch/tree/fork, compaction, resume | Session log plugin and profile composition | SQLite chat plus two JSON session/run stores; compaction heuristic | Durable canonical session schema and crash-safe resume/branch. |
+| Skills/extensions | Plugins, instructions, commands and MCP composition | Skills/prompts/themes/extensions/packages | Plugin bundles/profile patch layers | Skill catalogs, extension install and in-process `require` runner | Trust policy, versioning, scoped APIs, unload and compatibility. |
+| Coding workflow | Coding-focused file/shell/diff tools, session/worktree ecosystem | Read/write/edit/bash, file refs, diff and session navigation | Configurable coding agent tools and workspace runtimes | Workspace/fs/terminal/file generators; no structured Git or robust repository map | Diff-first edits, Git-aware review, repository indexing, recovery. |
+| UI surfaces | TUI, desktop/web/IDE integrations, ACP | TUI and embeddable/RPC/print modes; customizable UI | Web/desktop/headless forms | Integrated AI Studio tabs, chat, model, media, terminal and harness | Preserve studio breadth; improve agent trace, approvals, session navigation and accessibility. |
+| Security | Explicit permission rules, tool scopes and integration controls | Extensible hooks/tools; local trust boundary remains operator responsibility | Plugin trust/composition and deployment boundaries | loopback default; policy and path controls but shell/JS sandbox claims overstate isolation | P0 permission pipeline and actual OS-level isolation. |
+| General AI studio | Coding product focus | Toolkit focus | Harness platform focus | Local model/media workspace breadth | Abyx advantage if shared infrastructure becomes coherent. |
+
+## Gap records
+
+Detailed IDs, priority, complexity, risks and solutions are in 05. Summary: G-01 shell policy bypass (P0/HIGH); G-02 path containment race/ancestor gaps (P0/HIGH); G-03 non-sandboxed execution (P0/VERY HIGH); G-04 duplicate runtime bypass (P1/HIGH); G-05 unreachable route shortcuts (P1/LOW); G-06 cancellation and SSE lifecycle (P1/MEDIUM); G-07 heuristic context compaction (P1/MEDIUM); G-08 fragmented session persistence (P1/HIGH); G-09 provider contract drift (P1/HIGH); G-10 untrusted extension lifecycle (P1/HIGH); G-11 MCP policy/lifecycle (P1/HIGH); G-12 repository/Git workflow (P2/HIGH); G-13 observability correlation (P2/MEDIUM); G-14 UI trace/accessibility validation (P2/MEDIUM); G-15 RAG/index evaluation (P2/HIGH); G-16 general AI Studio lifecycle/benchmarking (P2/MEDIUM).
+
+Do not adopt product complexity without a user workflow: e.g. OpenCode's complete IDE/ACP surface or DSH's plugin/profile machinery is not automatically necessary. Target interoperability and measurable utility, not feature parity for its own sake.

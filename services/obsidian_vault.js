@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { exec, spawn } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const db = require('../db');
 
 const USER_DOCUMENTS = path.join(process.env.USERPROFILE || require('node:os').homedir(), 'Documents');
@@ -375,9 +375,9 @@ function syncWorkspace(customWsDir = null) {
 
     // Ensure junction in workspace to vault
     const wsVaultJunction = path.join(wsDir, 'vault');
-    if (!fs.existsSync(wsVaultJunction)) {
+    if (process.platform === 'win32' && !fs.existsSync(wsVaultJunction)) {
       try {
-        exec(`cmd /c mklink /J "${wsVaultJunction}" "${VAULT_PATH}"`);
+        fs.symlinkSync(VAULT_PATH, wsVaultJunction, 'junction');
       } catch (_) {}
     }
 
@@ -493,14 +493,17 @@ function launchObsidian() {
 
   if (exePath && fs.existsSync(exePath)) {
     try {
-      exec(`powershell -Command "Start-Process -FilePath '${exePath}'"`);
+      const child = spawn(exePath, [], { detached: true, stdio: 'ignore', windowsHide: true });
+      child.on('error', () => {});
+      child.unref();
       return { success: true, method: 'executable', path: exePath, vault: VAULT_PATH };
     } catch (e) {}
   }
 
   // Windows protocol launcher: obsidian://open?path=...
   const encodedPath = encodeURIComponent(VAULT_PATH);
-  exec(`start "" "obsidian://open?path=${encodedPath}"`, (err) => {
+  const launcher = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  execFile(launcher, [`obsidian://open?path=${encodedPath}`], { windowsHide: true }, (err) => {
     if (err) {
       console.error('[OBSIDIAN] Failed to launch via protocol:', err);
     }

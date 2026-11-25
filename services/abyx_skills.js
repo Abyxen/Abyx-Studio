@@ -38,10 +38,12 @@ function parseFrontmatter(content) {
   return { meta, body };
 }
 
-function indexSkills(force = false, profileId = 'prof_default') {
+function indexSkills(force = false, profileId = 'prof_default', { workspaceRoot = null } = {}) {
   const now = Date.now();
   const pid = String(profileId || 'prof_default').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const cached = profileSkillIndexes.get(pid);
+  const projectDir = workspaceRoot ? path.resolve(workspaceRoot, '.abyx', 'skills') : null;
+  const cacheKey = `${pid}:${projectDir || ''}`;
+  const cached = profileSkillIndexes.get(cacheKey);
   if (!force && cached && now - cached.indexedAt < 300000) {
     return Array.from(cached.skills.values());
   }
@@ -49,17 +51,34 @@ function indexSkills(force = false, profileId = 'prof_default') {
   const indexedSkills = new Map();
 
   const profileInstalledDir = path.join(dataDir, 'profiles', pid, 'extensions', 'installed', 'skills');
-  const scanDirs = [SKILLS_DIR, profileInstalledDir];
+  const scanDirs = [SKILLS_DIR];
   if (pid === 'prof_default') scanDirs.push(INSTALLED_SKILLS_DIR);
+  scanDirs.push(profileInstalledDir);
+  if (projectDir) scanDirs.push(projectDir);
   for (const sDir of scanDirs) {
     if (!fs.existsSync(sDir)) continue;
+    let extensionStatuses = null;
+    if (sDir === profileInstalledDir || (pid === 'prof_default' && sDir === INSTALLED_SKILLS_DIR)) {
+      const registryPath = path.join(path.dirname(path.dirname(sDir)), 'registry.json');
+      try {
+        const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+        extensionStatuses = registry.extensions || {};
+      } catch {}
+    }
     const entries = fs.readdirSync(sDir, { withFileTypes: true });
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
+        const installedRecord = extensionStatuses?.[entry.name];
+        if (installedRecord && installedRecord.status !== 'enabled') continue;
         const skillFile = path.join(sDir, entry.name, 'SKILL.md');
         if (fs.existsSync(skillFile)) {
           try {
+            const fileStat = fs.lstatSync(skillFile);
+            const realFile = fs.realpathSync(skillFile);
+            const realRoot = fs.realpathSync(sDir);
+            const relative = path.relative(realRoot, realFile);
+            if (fileStat.isSymbolicLink() || !fileStat.isFile() || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
             const raw = fs.readFileSync(skillFile, 'utf8');
             const { meta, body } = parseFrontmatter(raw);
 
@@ -73,7 +92,11 @@ function indexSkills(force = false, profileId = 'prof_default') {
               rawLength: raw.length,
               content: body,
               filePath: skillFile,
-              source: sDir !== SKILLS_DIR ? 'installed' : 'builtin'
+              source: sDir === SKILLS_DIR ? 'builtin' : sDir === projectDir ? 'project' : sDir === profileInstalledDir ? 'profile' : 'user',
+              scope: sDir === projectDir ? 'project' : sDir === SKILLS_DIR ? 'builtin' : 'user',
+              permissions: [],
+              dependencies: String(meta.dependencies || '').split(',').map(value => value.trim()).filter(Boolean).slice(0, 32),
+              enabled: true
             };
 
             indexedSkills.set(entry.name.toLowerCase(), skillObj);
@@ -85,7 +108,7 @@ function indexSkills(force = false, profileId = 'prof_default') {
     }
   }
 
-  profileSkillIndexes.set(pid, { skills: indexedSkills, indexedAt: now });
+  profileSkillIndexes.set(cacheKey, { skills: indexedSkills, indexedAt: now });
   return Array.from(indexedSkills.values());
 }
 
@@ -101,36 +124,34 @@ function determineCategory(name) {
   return 'Engineering Craftsmanship';
 }
 
-function getSkillsCatalog(profileId = 'prof_default') {
-  const skills = indexSkills(false, profileId);
+function getSkillsCatalog(profileId = 'prof_default', options = {}) {
+  const skills = indexSkills(false, profileId, options);
   return skills.map(s => ({
     id: s.id,
     name: s.name,
     description: s.description,
     category: s.category,
-    sizeBytes: s.rawLength
+    sizeBytes: s.rawLength,
+    version: s.version,
+    source: s.source,
+    scope: s.scope,
+    permissions: [],
+    dependencies: s.dependencies || [],
+    enabled: true
   }));
 }
 
-function getSkill(skillId, profileId = 'prof_default') {
+function getSkill(skillId, profileId = 'prof_default', options = {}) {
   if (!skillId) return null;
-  const indexedSkills = new Map(indexSkills(false, profileId).map(skill => [skill.id.toLowerCase(), skill]));
+  const indexedSkills = new Map(indexSkills(false, profileId, options).map(skill => [skill.id.toLowerCase(), skill]));
   const cleanId = String(skillId).toLowerCase().trim();
-  if (indexedSkills.has(cleanId)) {
-    return indexedSkills.get(cleanId);
-  }
-  for (const [id, skill] of indexedSkills.entries()) {
-    if (id.includes(cleanId) || cleanId.includes(id)) {
-      return skill;
-    }
-  }
-  return null;
+  return indexedSkills.get(cleanId) || null;
 }
 
-function findRelevantSkills(prompt, profileId = 'prof_default') {
+function findRelevantSkills(prompt, profileId = 'prof_default', options = {}) {
   if (!prompt || typeof prompt !== 'string') return [];
   const lower = prompt.toLowerCase();
-  const indexedSkills = indexSkills(false, profileId);
+  const indexedSkills = indexSkills(false, profileId, options);
 
   const matches = [];
   for (const skill of indexedSkills.values()) {
@@ -218,10 +239,10 @@ const SKILL_TOOLS = [
   }
 ];
 
-function executeSkillConsultation(skillName, profileId = 'prof_default') {
-  const skill = getSkill(skillName, profileId);
+function executeSkillConsultation(skillName, profileId = 'prof_default', options = {}) {
+  const skill = getSkill(skillName, profileId, options);
   if (!skill) {
-    const catalog = getSkillsCatalog(profileId).map(s => s.id).slice(0, 10).join(', ');
+    const catalog = getSkillsCatalog(profileId, options).map(s => s.id).slice(0, 10).join(', ');
     return {
       status: 'error',
       message: `Skill "${skillName}" not found. Available skills include: ${catalog}...`

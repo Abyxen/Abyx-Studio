@@ -1,0 +1,5 @@
+{
+  "name": "abyx-benchmark-mini-repo",
+  "private": true,
+  "scripts": { "test": "node --test" }
+}

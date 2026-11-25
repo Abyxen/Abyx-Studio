@@ -349,32 +349,34 @@ class ExtensionService {
       return {
         ok: true,
         manifest: inspected.manifest,
+        contentHash: inspected.contentHash,
         permissions: inspected.requestedPermissions,
-        preview: inspected.preview,
-        packageDir: isTemp ? packageDir : null // Pass tempDir so install can use it directly
+        preview: inspected.preview
       };
-    } catch (err) {
+    } finally {
       if (isTemp) {
         try { fs.rmSync(packageDir, { recursive: true, force: true }); } catch (e) {}
       }
-      throw err;
     }
   }
 
   /**
    * Install an extension/skill from GitHub URL or local disk path
    */
-  async install(source, { grantedPermissions = null, enabled = true } = {}) {
+  async install(source, { grantedPermissions = null, enabled = true, installationApproved = false, expectedContentHash = null } = {}) {
+    if (installationApproved !== true) throw new Error('Explicit installation approval is required before installing an extension package');
     const { packageDir, isTemp } = await this.preparePackage(source);
     try {
       const inspected = this.packageManager.inspectPackage(packageDir);
-      const effectivePermissions = grantedPermissions !== null
-        ? grantedPermissions
-        : inspected.requestedPermissions;
+      if (!expectedContentHash || expectedContentHash !== inspected.contentHash) throw new Error('Package contents changed after inspection; inspect again before approving installation');
+      const effectivePermissions = grantedPermissions;
 
       const result = this.packageManager.install(packageDir, {
         grantedPermissions: effectivePermissions,
-        enabled
+        enabled,
+        installationApproved,
+        expectedContentHash,
+        provenance: source
       });
 
       if (result.extension.kind === ExtensionKind.SKILL && abyxSkills?.indexSkills) {
@@ -382,7 +384,7 @@ class ExtensionService {
       }
 
       // 2. If it's an MCP Server, register it into mcp_config.json
-      if (result.extension.kind === ExtensionKind.MCP && mcpClient) {
+      if (result.extension.kind === ExtensionKind.MCP && mcpClient && result.extension.status === ExtensionStatus.ENABLED) {
         this.registerMcpServer(result.extension);
       }
 
@@ -396,6 +398,27 @@ class ExtensionService {
       if (isTemp) {
         try { fs.rmSync(packageDir, { recursive: true, force: true }); } catch (e) {}
       }
+    }
+  }
+
+  async update(id, source, { grantedPermissions, installationApproved = false, expectedContentHash } = {}) {
+    if (installationApproved !== true || !Array.isArray(grantedPermissions) || typeof expectedContentHash !== 'string') {
+      throw new Error('Explicit update approval, inspected content hash and reviewed permissions are required');
+    }
+    const { packageDir, isTemp } = await this.preparePackage(source);
+    try {
+      const inspected = this.packageManager.inspectPackage(packageDir);
+      if (inspected.contentHash !== expectedContentHash) throw new Error('Package contents changed after inspection; inspect again before approving update');
+      const result = this.packageManager.update(id, packageDir, {
+        grantedPermissions,
+        installationApproved,
+        expectedContentHash,
+        provenance: source
+      });
+      if (result.extension.kind === ExtensionKind.SKILL && abyxSkills?.indexSkills) abyxSkills.indexSkills(true, this.profileId);
+      return { ok: true, updated: true, extension: result.extension, message: result.message };
+    } finally {
+      if (isTemp) { try { fs.rmSync(packageDir, { recursive: true, force: true }); } catch {} }
     }
   }
 
@@ -428,6 +451,9 @@ class ExtensionService {
    * Toggle extension enabled status
    */
   toggle(id, enabled) {
+    const current = this.packageManager.getExtension(id);
+    if (!current) throw new Error(`Extension "${id}" is not installed`);
+    if (enabled && current.kind !== ExtensionKind.SKILL) throw new Error('Executable plugins and MCP packages remain disabled until an isolated extension host is available');
     const ext = enabled
       ? this.packageManager.enable(id)
       : this.packageManager.disable(id);

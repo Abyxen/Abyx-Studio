@@ -155,35 +155,12 @@ async function processSessionReview(sessionId, model = 'axom:1.1', ollamaBase = 
       return { status: 'error', reason: 'invalid_schema', raw: rawContent };
     }
 
-    // COMPONENT D: STATE MUTATION & DISPATCH
-    const stats = db.applyMemoryActions(
-      reviewResult.memory_actions,
-      sessionId,
-      reviewResult.session_summary || null,
-      profileId
-    );
-
-    console.log(`[REVIEWER] Session ${sessionId} review completed successfully.`);
-    console.log(`[REVIEWER] Actions applied: Created=${stats.created}, Updated=${stats.updated}, Deleted=${stats.deleted}`);
-    if (reviewResult.session_summary) {
-      console.log(`[REVIEWER] Summary: "${reviewResult.session_summary}"`);
-    }
-
-    // COMPONENT E: OBSIDIAN SECOND BRAIN REAL-TIME VAULT SYNC
-    try {
-      const obsidianVault = require('./obsidian_vault');
-      if (profileId === 'prof_default') obsidianVault.syncAll();
-      console.log(`[REVIEWER] Obsidian Second Brain synced with vault at ${obsidianVault.VAULT_PATH}`);
-    } catch (obsidianErr) {
-      console.warn('[REVIEWER] Failed to sync with Obsidian vault:', obsidianErr.message);
-    }
-
     return {
-      status: 'success',
+      status: 'proposed',
+      approvalRequired: true,
       session_id: sessionId,
       actions: reviewResult.memory_actions,
       summary: reviewResult.session_summary,
-      stats
     };
   } catch (err) {
     console.error(`[REVIEWER] Error reviewing session ${sessionId}:`, err.message);

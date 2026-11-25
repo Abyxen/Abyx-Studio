@@ -1,0 +1,1 @@
+Unicode fixture content: café, naïve, 東京.

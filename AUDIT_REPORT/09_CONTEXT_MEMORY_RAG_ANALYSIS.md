@@ -1,0 +1,9 @@
+# Context, Memory and RAG
+
+`services/context_manager.js` estimates tokens from character count, whitespace count and basic code/JSON heuristics. Model ceilings are static name-substring mappings. Telemetry thresholds exist, and `compactConversation()` preserves the first system message and last four non-system messages while replacing the middle with an extractive note from first lines. This is not a semantic summary, does not preserve tool-call/result pairing, and is not integrated into the main agent request path. Treat telemetry as approximate.
+
+Persistent memory has several forms: SQLite chat/profile/usage tables (`db.js`), run JSON (`agent/execution_logger.js`), `HarnessSessionStore` event/turn JSON, living-memory and Obsidian services, and RAG knowledge storage. `rag/knowledge_service.js` composes document parser, chunker, embeddings and DB queries; it can prompt for source citations. The existence of chunking/vector-like search does not demonstrate retrieval quality, provenance freshness or deletion propagation.
+
+Recommended sequence: select one canonical conversation/session model; preserve typed assistant tool calls and tool results as atomic pairs; implement durable event log + snapshots and recovery; add tokenizer-aware budgeting with provider usage; compact only under model threshold and preserve system policy, active task, unresolved tool state and citations. Separate project memory (explicit user-approved durable facts) from conversation transcript and retrieval index. Track source path/hash, parser version, chunk IDs, index time and stale/deletion states. Test retrieval recall and citation correctness on a fixed corpus, plus prompt-injection cases in documents. Never label a heuristic estimate “accurate.”
+
+Sources: `services/context_manager.js`, `db.js`, `db_migrations.js`, `agent/execution_logger.js`, `harness/agent_seam.js`, `rag/knowledge_service.js`, `rag/document_parser.js`, `rag/chunker.js`, `rag/embeddings.js`.

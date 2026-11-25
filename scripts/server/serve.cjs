@@ -12,6 +12,7 @@ const path     = require("path");
 const { spawn, spawnSync, execSync, exec, execFile } = require("child_process");
 const { comprehensiveWebSearch } = require("../search/core");
 const { detectModelKindCached } = require("./model-kind.cjs");
+const { validateLocalRequest, redactError, isLoopbackHost } = require("../../security/local_server_guard");
 
 // Safe crash guards for unhandled network resets and rejections
 process.on("uncaughtException", (err) => {
@@ -102,6 +103,14 @@ try {
   cloudRoutes = require(path.join(__dirname, "cloud_routes.cjs"));
 } catch (e) {
   console.warn("  [abyx] Could not load cloud_routes.cjs:", e.message);
+}
+
+let processLifecycleManager = null;
+try {
+  processLifecycleManager = require(path.join(ROOT, "services", "process_lifecycle_manager.js"));
+  console.log("  [abyx] Initialized Process Lifecycle Manager");
+} catch (e) {
+  console.warn("  [abyx] Could not load process_lifecycle_manager.js:", e.message);
 }
 
 // Instantiate Phase 4 Service dependencies
@@ -3226,9 +3235,9 @@ async function killLlm() {
   llmSettings.visionStatus = "Projector not loaded";
   llmSettings.mmproj = null;
 
-  if (osPlatform === "win32") {
+  if (processLifecycleManager) {
     try {
-      spawnSync("taskkill", ["/F", "/IM", "llama-server.exe", "/T"], { stdio: "ignore", windowsHide: true });
+      await processLifecycleManager.terminate("llm", { gracefulTimeoutMs: 2000 });
     } catch (_) {}
   }
 
@@ -4529,24 +4538,18 @@ function getDefaultModel() {
 }
 
 function killBackend() {
-  return new Promise(resolve => {
+  return new Promise(async (resolve) => {
     resetGenerationState();
-    const proc = backendProc;
-    if (!proc) {
-      backendUnloadState = { active: false, phase: "", progress: 0 };
-      resolve();
-      return;
+    if (processLifecycleManager) {
+      try {
+        await processLifecycleManager.terminate("backend", { gracefulTimeoutMs: 1500 });
+      } catch (_) {}
     }
-    backendUnloadState = { active: true, phase: "Stopping backend process...", progress: 10 };
+    const proc = backendProc;
+    backendProc = null;
     backendReady = false;
-    try { proc.kill("SIGTERM"); } catch (_) {}
-    backendUnloadState = { active: true, phase: "Waiting for process exit...", progress: 50 };
-    setTimeout(() => {
-      try { proc.kill("SIGKILL"); } catch (_) {}
-      if (backendProc === proc) backendProc = null;
-      backendUnloadState = { active: false, phase: "Backend unloaded", progress: 100 };
-      resolve();
-    }, 2000);
+    backendUnloadState = { active: false, phase: "Backend unloaded", progress: 100 };
+    resolve();
   });
 }
 
@@ -4886,6 +4889,10 @@ async function startLlmWithBackend(settings = {}, backend) {
     batchSize: Math.max(128, Math.min(2048, effectiveBatchSize)),
     ubatchSize: Math.max(128, Math.min(2048, effectiveUbatchSize)),
     performanceProfile: settings.performanceProfile || llmSettings.performanceProfile || "balanced",
+    ropeScaling: settings.ropeScaling || llmSettings.ropeScaling || "none",
+    ropeFreqScale: Number(settings.ropeFreqScale ?? llmSettings.ropeFreqScale ?? 1.0),
+    ropeFreqBase: Number(settings.ropeFreqBase ?? llmSettings.ropeFreqBase ?? 0),
+    yarnOrigCtx: Number(settings.yarnOrigCtx ?? llmSettings.yarnOrigCtx ?? 4096),
   };
 
   let mmprojPath = null;
@@ -4975,6 +4982,23 @@ async function startLlmWithBackend(settings = {}, backend) {
   if (isSyclBackend) {
     args.push("--no-warmup");
   }
+
+  // RoPE Context Window Scaling (e.g. for scaling models like Qwen 2.5 safely to 32K/64K on 8GB VRAM)
+  const ropeScaling = llmSettings.ropeScaling;
+  const ropeFreqScale = Number(llmSettings.ropeFreqScale);
+  const ropeFreqBase = Number(llmSettings.ropeFreqBase);
+  if (ropeScaling && ropeScaling !== "none") {
+    args.push("--rope-scaling", String(ropeScaling));
+  }
+  if (Number.isFinite(ropeFreqScale) && ropeFreqScale > 0 && ropeFreqScale !== 1) {
+    args.push("--rope-freq-scale", String(ropeFreqScale));
+  }
+  if (Number.isFinite(ropeFreqBase) && ropeFreqBase > 0) {
+    args.push("--rope-freq-base", String(ropeFreqBase));
+  }
+  if (llmSettings.yarnOrigCtx && ropeScaling === "yarn") {
+    args.push("--yarn-orig-ctx", String(llmSettings.yarnOrigCtx));
+  }
   
   // CPU mode: lock memory to prevent OS paging (critical for consistent speed)
   const isGpuMode = backend.mode.includes("GPU") || backend.mode.includes("CUDA") ||
@@ -5043,6 +5067,14 @@ async function startLlmWithBackend(settings = {}, backend) {
   const proc = spawn(backend.path, args, { stdio: "pipe", env: spawnEnv });
   const procSeq = ++llmProcSeq;
   llmProc = proc;
+  if (processLifecycleManager) {
+    processLifecycleManager.register("llm", proc, {
+      role: "llm",
+      port: PORT_LLM,
+      binary: path.basename(backend.path),
+      model: filename
+    });
+  }
   proc.stdout.on("data", (data) => {
     if (llmProc !== proc) return;
     process.stdout.write("  [llm] " + data.toString());
@@ -5252,6 +5284,14 @@ async function startBackend(settings = {}) {
   const procSeq = ++backendProcSeq;
   const proc = spawn(backendPath, args, { stdio: "pipe", env: spawnEnv });
   backendProc = proc;
+  if (processLifecycleManager) {
+    processLifecycleManager.register("backend", proc, {
+      role: "image",
+      port: PORT_BACKEND,
+      binary: path.basename(backendPath),
+      model: currentSettings?.model || ""
+    });
+  }
   startBackendReadyPoll();
   const coremlLoadHeartbeat = startCoreMLLoadHeartbeat(proc);
 
@@ -5951,8 +5991,8 @@ function startModelDownload(url, overrideFilename = null, targetDir = MODELS, ki
 
           if (destPath.toLowerCase().endsWith(".zip")) {
             try {
-              const { execSync } = require("child_process");
-              execSync(`unzip -o "${destPath}" -d "${path.dirname(destPath)}"`, { stdio: "ignore" });
+              const unzipResult = spawnSync("unzip", ["-o", destPath, "-d", path.dirname(destPath)], { stdio: "ignore", windowsHide: true, timeout: 10 * 60 * 1000 });
+              if (unzipResult.error || unzipResult.status !== 0) throw new Error("Archive extraction failed");
               fs.unlinkSync(destPath);
             } catch(err) {
               console.error("Failed to unzip", err);
@@ -6524,7 +6564,9 @@ function streamModelUpload(req, filename, targetDir = MODELS, mode = "image") {
 }
 
 function json(res, code, obj) {
-  const body = JSON.stringify(obj);
+  const safe = { ...obj };
+  if (typeof safe.error === "string") safe.error = redactError({ message: safe.error });
+  const body = JSON.stringify(safe);
   res.writeHead(code, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
   res.end(body);
   return true;
@@ -6532,9 +6574,16 @@ function json(res, code, obj) {
 
 // ── HTTP Server ───────────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
+  const requestCheck = validateLocalRequest(req, PORT_FRONTEND);
+  if (!requestCheck.ok) {
+    res.writeHead(requestCheck.status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify({ ok: false, error: requestCheck.error }));
+    return;
+  }
+
   // CORS preflight
   if (req.method === "OPTIONS") {
-    res.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Methods": "GET,POST" });
+    res.writeHead(204, { "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Methods": "GET,POST" });
     res.end(); return;
   }
 
@@ -6549,7 +6598,17 @@ const server = http.createServer(async (req, res) => {
   if (phase4Routes && (await phase4Routes.handlePhase4Routes(req, res, { studyService, automationService, obsidianVault, subagents, mcpClient, readJsonBody, json }))) {
     return;
   }
-  if (harnessRoutes && (await harnessRoutes.handleHarnessRoutes(req, res, { workspaceService, aiProviders, db, readJsonBody, json }))) {
+  if (harnessRoutes && (await harnessRoutes.handleHarnessRoutes(req, res, {
+    workspaceService,
+    aiProviders,
+    db,
+    readJsonBody,
+    json,
+    getLlmSettings: () => llmSettings,
+    updateLlmSettings: (s) => { llmSettings = { ...llmSettings, ...s }; },
+    startLlm,
+    isLlmRunning: () => Boolean(llmProc && !llmProc.killed)
+  }))) {
     return;
   }
 
@@ -8389,9 +8448,14 @@ async function getLlmfitRecommendations(useCase = "chat", limit = 10) {
      <img src="assets/hero.png" data-generate="detailed description of the visual scene" alt="Hero" />`;
     }
 
+    const agentMode = String(body.agentMode || 'act').toLowerCase();
+    const modeInstruction = agentMode === 'plan'
+      ? `\nAGENT MODE: PLAN ONLY\n- Formulate a structured step-by-step architecture and implementation plan.\n- Analyze requirements, edge cases, risks, and required dependencies.\n- Do NOT generate full code blocks or save files yet; focus on architectural strategy and user alignment.`
+      : `\nAGENT MODE: ACT / AUTONOMOUS EXECUTION\n- Direct execution mode. Implement complete production-grade code, generate files, and configure dependencies directly in the workspace.`;
+
     const wsInstruction = `\n\n# IDENTITY & AGENT HARNESS CONTEXT:
 You are AbyxV2 9B, an autonomous senior engineer and AI agent operating inside the Abyx Agent Harness.
-Active Workspace: "${wsTargetDir}" (Project: "${activeWs?.name || 'abyx'}").
+Active Workspace: "${wsTargetDir}" (Project: "${activeWs?.name || 'abyx'}").${modeInstruction}
 
 CORE OPERATIONAL RULES:
 1. CONVERSATIONAL DIRECTNESS & RESTRAINT:
@@ -8581,7 +8645,8 @@ ${skillsContext}`;
       if (fs.existsSync(modelPath)) {
         try {
           console.log(`  [llm] Auto-starting local model: ${targetModel}`);
-          await runExclusiveLlmOperation(() => startLlm({ model: targetModel, contextSize: 262144, gpuLayers: -1 }));
+          const savedModelSettings = getLlmModelSettings(targetModel)?.lastSettings || {};
+          await runExclusiveLlmOperation(() => startLlm({ model: targetModel, ...savedModelSettings }));
         } catch (startErr) {
           console.warn(`  [llm] Auto-start failed: ${startErr.message}`);
         }
@@ -9012,268 +9077,6 @@ ${skillsContext}`;
     return;
   }
 
-  // POST /api/workspace/reveal or /api/files/open — Reveals file in Windows Explorer / OS file manager
-  if ((req.url === "/api/workspace/reveal" || req.url === "/api/files/open") && req.method === "POST") {
-    try {
-      const body = await readJsonBody(req, res);
-      if (!body) return;
-      const targetRel = String(body.path || body.filePath || "index.html").trim().replace(/^[/\\]+/, "");
-      const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
-      const wsDir = (activeWs && activeWs.path) ? activeWs.path : path.join(ROOT, "app", "workspace", "abyx");
-      let fullPath = path.isAbsolute(body.path || "") ? body.path : path.join(wsDir, targetRel);
-
-      if (!fs.existsSync(fullPath)) {
-        const base = path.basename(targetRel);
-        const candidates = [
-          path.join(wsDir, "audio", base),
-          path.join(wsDir, "assets", base),
-          path.join(TTS_OUTPUTS, base),
-          path.join(OUTPUTS, base),
-          path.join(ROOT, "app", "workspace", "abyx", "audio", base),
-          path.join(ROOT, "app", "workspace", "abyx", "assets", base),
-          path.join(ROOT, "data", "images", base)
-        ];
-        try {
-          const entries = fs.readdirSync(wsDir, { withFileTypes: true });
-          for (const ent of entries) {
-            if (ent.isDirectory()) {
-              candidates.push(path.join(wsDir, ent.name, base));
-              candidates.push(path.join(wsDir, ent.name, targetRel));
-            }
-          }
-        } catch (_) {}
-        const found = candidates.find(p => fs.existsSync(p));
-        if (found) fullPath = found;
-      }
-
-      // If code was provided and file does not exist yet on disk, create it
-      if (body.code && typeof body.code === "string" && !fs.existsSync(fullPath)) {
-        try {
-          fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-          fs.writeFileSync(fullPath, body.code, "utf8");
-        } catch (_) {}
-      }
-
-      const exists = fs.existsSync(fullPath);
-      const pathToReveal = exists ? fullPath : (fs.existsSync(path.dirname(fullPath)) ? path.dirname(fullPath) : wsDir);
-
-      if (osPlatform === "win32") {
-        const winPath = pathToReveal.replace(/\//g, "\\");
-        if (exists && !fs.statSync(fullPath).isDirectory()) {
-          exec(`explorer.exe /select,"${winPath}"`);
-        } else {
-          exec(`explorer.exe "${winPath}"`);
-        }
-      } else if (osPlatform === "darwin") {
-        exec(`open -R "${pathToReveal}"`);
-      } else {
-        exec(`xdg-open "${path.dirname(pathToReveal)}"`);
-      }
-
-      return json(res, 200, { ok: true, path: fullPath, revealed: pathToReveal, exists });
-    } catch (err) {
-      return json(res, 500, { ok: false, error: err.message });
-    }
-  }
-
-  // POST /api/files/save — Saves file directly to active workspace directory
-  if (req.url === "/api/files/save" && req.method === "POST") {
-    try {
-      const body = await readJsonBody(req, res);
-      if (!body) return;
-      const filename = String(body.filename || "").trim().replace(/^[/\\]+/, "");
-      if (!filename) return json(res, 400, { ok: false, error: "Missing filename" });
-      const content = String(body.content ?? "");
-      const subfolder = String(body.subfolder || "").trim().replace(/^[/\\]+/, "");
-
-      const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
-      const wsDir = (activeWs && activeWs.path) ? activeWs.path : path.join(ROOT, "app", "workspace", "abyx");
-      const targetDir = subfolder ? path.join(wsDir, subfolder) : wsDir;
-      const filePath = path.join(targetDir, filename);
-
-      const encoding = String(body.encoding || "utf8").toLowerCase();
-      let fileBuffer;
-      if (encoding === "base64") {
-        fileBuffer = Buffer.from(content, "base64");
-      } else {
-        fileBuffer = Buffer.from(content, "utf8");
-      }
-
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, fileBuffer);
-      const stat = fs.statSync(filePath);
-
-      return json(res, 200, {
-        ok: true,
-        path: path.relative(wsDir, filePath).replace(/\\/g, "/"),
-        fullPath: filePath,
-        size: stat.size
-      });
-    } catch (err) {
-      return json(res, 500, { ok: false, error: err.message });
-    }
-  }
-
-  // GET /api/files/download?path=filename
-  if (req.url.startsWith("/api/files/download") && req.method === "GET") {
-    try {
-      const parsedUrl = new URL(req.url, "http://127.0.0.1");
-      const rawRelPath = (parsedUrl.searchParams.get("path") || "").trim().replace(/^[/\\]+/, "");
-      if (!rawRelPath) return json(res, 400, { ok: false, error: "Missing path parameter" });
-      const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
-      const wsDir = (activeWs && activeWs.path) ? activeWs.path : path.join(ROOT, "app", "workspace", "abyx");
-      const filePath = path.normalize(path.join(wsDir, rawRelPath));
-      if (!pathInside(filePath, wsDir) || !fs.existsSync(filePath)) {
-        return json(res, 404, { ok: false, error: "File not found" });
-      }
-      const stat = fs.statSync(filePath);
-      const ext = path.extname(filePath).toLowerCase();
-      const mime = MIME[ext] || "application/octet-stream";
-      res.writeHead(200, {
-        "Content-Type": mime,
-        "Content-Length": stat.size,
-        "Content-Disposition": `attachment; filename="${path.basename(filePath)}"`,
-        "Access-Control-Allow-Origin": "*",
-      });
-      fs.createReadStream(filePath).pipe(res);
-      return;
-    } catch (err) {
-      return json(res, 500, { ok: false, error: err.message });
-    }
-  }
-
-  // POST /api/chat/quick-image
-  if (req.url === "/api/chat/quick-image" && req.method === "POST") {
-    try {
-      const body = await readJsonBody(req, res);
-      if (!body || !body.prompt) return json(res, 400, { ok: false, error: "Prompt is required" });
-      const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
-      const result = await executeAutonomousImageGen(body.prompt, body.filename || "", activeWs);
-      if (result) {
-        return json(res, 200, { ok: true, image: result });
-      }
-      return json(res, 500, { ok: false, error: "Could not generate image. Check local SD model or network connection." });
-    } catch (err) {
-      return json(res, 500, { ok: false, error: err.message });
-    }
-  }
-
-  // POST /api/chat/quick-audio
-  if (req.url === "/api/chat/quick-audio" && req.method === "POST") {
-    try {
-      const body = await readJsonBody(req, res);
-      if (!body || !body.text) return json(res, 400, { ok: false, error: "Text is required" });
-      const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
-      const result = await executeAutonomousAudioGen(body.text, body.filename || "", activeWs);
-      if (result) {
-        return json(res, 200, { ok: true, audio: result });
-      }
-      return json(res, 500, { ok: false, error: "Could not synthesize audio. Kokoro TTS runtime error." });
-    } catch (err) {
-      return json(res, 500, { ok: false, error: err.message });
-    }
-  }
-
-  // GET /api/browser/proxy?url=...
-  if (req.url.startsWith("/api/browser/proxy") && (req.method === "GET" || req.method === "HEAD")) {
-    try {
-      const parsedUrl = new URL(req.url, "http://127.0.0.1");
-      const targetUrl = parsedUrl.searchParams.get("url") || "";
-      if (!targetUrl) return json(res, 400, { ok: false, error: "Missing url parameter" });
-
-      if (targetUrl.startsWith("local://")) {
-        const localFile = targetUrl.replace(/^local:\/\//, "").split("?")[0] || "index.html";
-        const cleanRel = localFile.replace(/^[/\\]+/, "").replace(/\.\./g, "");
-        const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
-        const wsDir = (activeWs && activeWs.path) ? activeWs.path : path.join(ROOT, "app", "workspace", "abyx");
-        let filePath = path.join(wsDir, cleanRel);
-
-        // If target points to a directory, look for index.html inside
-        if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
-          const indexCandidate = path.join(filePath, "index.html");
-          if (fs.existsSync(indexCandidate)) {
-            filePath = indexCandidate;
-          }
-        }
-
-        // If not found directly, search inside project directories in wsDir
-        if (!fs.existsSync(filePath)) {
-          try {
-            const entries = fs.readdirSync(wsDir, { withFileTypes: true });
-            const subdirs = entries
-              .filter(e => e.isDirectory() && e.name !== "assets" && e.name !== "audio")
-              .map(e => ({ name: e.name, mtime: fs.statSync(path.join(wsDir, e.name)).mtimeMs }))
-              .sort((a, b) => b.mtime - a.mtime);
-
-            for (const sub of subdirs) {
-              const candidate = path.join(wsDir, sub.name, cleanRel);
-              if (fs.existsSync(candidate)) {
-                filePath = candidate;
-                break;
-              }
-              const baseCandidate = path.join(wsDir, sub.name, path.basename(cleanRel));
-              if (fs.existsSync(baseCandidate)) {
-                filePath = baseCandidate;
-                break;
-              }
-              if (cleanRel === "index.html" || cleanRel === "") {
-                const indexCand = path.join(wsDir, sub.name, "index.html");
-                if (fs.existsSync(indexCand)) {
-                  filePath = indexCand;
-                  break;
-                }
-              }
-            }
-          } catch (_) {}
-        }
-
-        if (fs.existsSync(filePath) && !fs.statSync(filePath).isDirectory()) {
-          const stat = fs.statSync(filePath);
-          const ext = path.extname(filePath).toLowerCase();
-          const mime = MIME[ext] || "text/html; charset=utf-8";
-          res.writeHead(200, {
-            "Content-Type": mime,
-            "Content-Length": stat.size,
-            "Access-Control-Allow-Origin": "*",
-          });
-          if (req.method === "HEAD") return res.end();
-          fs.createReadStream(filePath).pipe(res);
-          return;
-        }
-
-        const placeholderHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Workspace Preview</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#050505;color:#ededed;font-family:sans-serif;text-align:center;padding:20px;box-sizing:border-box;}.box{max-width:480px;border:1px solid #333;border-radius:12px;padding:32px;background:#111;}.btn{background:#38bdf8;color:#000;padding:10px 20px;border-radius:6px;border:none;cursor:pointer;font-weight:bold;margin-top:16px;}</style></head><body><div class="box"><h2>No '${path.basename(cleanRel)}' found yet</h2><p style="color:#888;">Ask Abyx to generate your website or app code, and it will render live here automatically.</p></div></body></html>`;
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Access-Control-Allow-Origin": "*" });
-        if (req.method === "HEAD") return res.end();
-        return res.end(placeholderHtml);
-      }
-
-      // External HTTP/HTTPS proxy with stripped security headers so iframes don't block
-      const httpModule = targetUrl.startsWith("https:") ? https : http;
-      const proxyReq = httpModule.get(targetUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        }
-      }, (proxyRes) => {
-        const headers = { ...proxyRes.headers, "access-control-allow-origin": "*" };
-        delete headers["x-frame-options"];
-        delete headers["content-security-policy"];
-        delete headers["content-security-policy-report-only"];
-
-        res.writeHead(proxyRes.statusCode || 200, headers);
-        if (req.method === "HEAD") return res.end();
-        proxyRes.pipe(res);
-      });
-      proxyReq.on("error", (err) => {
-        res.writeHead(502, { "Content-Type": "text/html", "Access-Control-Allow-Origin": "*" });
-        res.end(`<h3>Proxy Error</h3><p>${err.message}</p>`);
-      });
-      return;
-    } catch (err) {
-      return json(res, 500, { ok: false, error: err.message });
-    }
-  }
-
   if (req.url.startsWith("/video-outputs/") && (req.method === "GET" || req.method === "HEAD")) {
     const filename = path.basename(decodeURIComponent(req.url.replace(/^\/video-outputs\//, "").split("?")[0] || ""));
     const filePath = path.join(VIDEO_OUTPUTS, filename);
@@ -9384,8 +9187,10 @@ ${skillsContext}`;
       // If code was provided and file does not exist yet on disk, create it
       if (body.code && typeof body.code === "string" && !fs.existsSync(fullPath)) {
         try {
-          fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-          fs.writeFileSync(fullPath, body.code, "utf8");
+          if (pathInside(fullPath, wsDir)) {
+            const relative = path.relative(wsDir, fullPath);
+            fileService.saveWorkspaceFile(path.basename(fullPath), body.code, path.dirname(relative), wsDir);
+          }
         } catch (_) {}
       }
 
@@ -9395,14 +9200,14 @@ ${skillsContext}`;
       if (osPlatform === "win32") {
         const winPath = pathToReveal.replace(/\//g, "\\");
         if (exists && !fs.statSync(fullPath).isDirectory()) {
-          exec(`explorer.exe /select,"${winPath}"`);
+          execFile("explorer.exe", [`/select,${winPath}`], { windowsHide: true }, () => {});
         } else {
-          exec(`explorer.exe "${winPath}"`);
+          execFile("explorer.exe", [winPath], { windowsHide: true }, () => {});
         }
       } else if (osPlatform === "darwin") {
-        exec(`open -R "${pathToReveal}"`);
+        execFile("open", ["-R", pathToReveal], () => {});
       } else {
-        exec(`xdg-open "${path.dirname(pathToReveal)}"`);
+        execFile("xdg-open", [path.dirname(pathToReveal)], () => {});
       }
 
       return json(res, 200, { ok: true, path: fullPath, revealed: pathToReveal, exists });
@@ -9419,13 +9224,19 @@ ${skillsContext}`;
       const filename = String(body.filename || "").trim().replace(/^[/\\]+/, "");
       if (!filename) return json(res, 400, { ok: false, error: "Missing filename" });
       const content = String(body.content ?? "");
-      const subfolder = String(body.subfolder || "").trim().replace(/^[/\\]+/, "");
+      let subfolder = String(body.subfolder || "").trim().replace(/^[/\\]+/, "");
+      const conversationId = body.conversationId || null;
+      const prompt = body.prompt || "";
+
+      // Auto-isolate into dedicated project folder (e.g. abyx_2026-11-25) if subfolder not specified
+      if (!subfolder && (conversationId || prompt)) {
+        try {
+          subfolder = resolveProjectFolder(prompt, conversationId);
+        } catch (_) {}
+      }
 
       const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
       const wsDir = (activeWs && activeWs.path) ? activeWs.path : path.join(ROOT, "app", "workspace", "abyx");
-      const targetDir = subfolder ? path.join(wsDir, subfolder) : wsDir;
-      const filePath = path.join(targetDir, filename);
-
       const encoding = String(body.encoding || "utf8").toLowerCase();
       let fileBuffer;
       if (encoding === "base64") {
@@ -9434,8 +9245,8 @@ ${skillsContext}`;
         fileBuffer = Buffer.from(content, "utf8");
       }
 
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, fileBuffer);
+      const saved = fileService.saveWorkspaceFile(filename, fileBuffer, subfolder, wsDir);
+      const filePath = saved.path;
       const stat = fs.statSync(filePath);
 
       return json(res, 200, {
@@ -9871,8 +9682,12 @@ ${skillsContext}`;
 
 server.timeout = 0; // Disable socket timeout for large model uploads/downloads
 
-// Local-only by default: the UI has no login. Set UAIS_HOST=0.0.0.0 to share it on your network.
-server.listen(PORT_FRONTEND, process.env.ABYX_HOST || process.env.UAIS_HOST || "127.0.0.1", () => {
+// The UI has no login, so keep the control server on loopback only.
+const requestedHost = process.env.ABYX_HOST || process.env.UAIS_HOST;
+if (requestedHost && !isLoopbackHost(requestedHost)) {
+  console.warn("  [security] Ignoring non-loopback ABYX_HOST/UAIS_HOST; the local API has no remote authentication.");
+}
+server.listen(PORT_FRONTEND, "127.0.0.1", () => {
   console.log("");
   console.log("  ============================================================");
   console.log("   ABYX UNIFIED AI STUDIO    |  Running");
@@ -9887,6 +9702,12 @@ server.listen(PORT_FRONTEND, process.env.ABYX_HOST || process.env.UAIS_HOST || "
 
   // Do not auto-start backend; wait for selection from the Web UI
   console.log("  [backend] Ready. Waiting for model load request from the webapp...");
+
+  if (processLifecycleManager) {
+    processLifecycleManager.cleanupStaleProcesses().catch((err) => {
+      console.warn("  [process-manager] Stale cleanup warning:", err.message);
+    });
+  }
 });
 
 // Graceful shutdown

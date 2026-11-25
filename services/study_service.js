@@ -13,6 +13,7 @@ const { dataDir } = require('../data_paths');
 const DocumentParser = require('../rag/document_parser');
 const aiProviders = require('./ai_providers');
 const { fetchPublicResponse } = require('../security/public_fetch');
+const PathGuard = require('../agent/path_guard');
 
 class StudyService {
   constructor(knowledgeService, options = {}) {
@@ -22,14 +23,49 @@ class StudyService {
     if (!fs.existsSync(this.sourcesDir)) {
       fs.mkdirSync(this.sourcesDir, { recursive: true });
     }
+    this.sourcesDir = fs.realpathSync.native(this.sourcesDir);
+    this.sourcesGuard = new PathGuard(this.sourcesDir);
   }
 
   _getProfileSourcesDir(profileId = 'prof_default') {
+    if (typeof profileId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(profileId)) throw new Error('Invalid profile identifier');
     const dir = path.join(this.sourcesDir, profileId);
+    const safeDir = this.sourcesGuard.resolveSafePath(dir, { allowCreate: true });
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+      this.sourcesGuard.resolveSafePath(dir, { allowCreate: true });
+      fs.mkdirSync(safeDir, { recursive: true });
+      this.sourcesGuard.resolveSafePath(dir);
     }
-    return dir;
+    return safeDir;
+  }
+
+  _writeSourceFile(profileId, fileName, data) {
+    const dir = this._getProfileSourcesDir(profileId);
+    const safeName = path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 128);
+    if (!safeName || safeName === '.' || safeName === '..') throw new Error('Invalid source file name');
+    const targetPath = this.sourcesGuard.resolveSafePath(path.join(dir, safeName), { allowCreate: true });
+    if (this.sourcesGuard.resolveSafePath(path.join(dir, safeName), { allowCreate: true }) !== targetPath) throw new Error('Source path changed during validation');
+    const tempPath = path.join(dir, `.abyx-${crypto.randomUUID()}.tmp`);
+    let fd;
+    try {
+      fd = fs.openSync(tempPath, 'wx', 0o600);
+      fs.writeFileSync(fd, data);
+      fs.fsyncSync(fd);
+      fs.closeSync(fd);
+      fd = null;
+      if (this.sourcesGuard.resolveSafePath(path.join(dir, safeName), { allowCreate: true }) !== targetPath) throw new Error('Source path failed final validation');
+      fs.renameSync(tempPath, targetPath);
+    } catch (error) {
+      if (fd !== null && fd !== undefined) fs.closeSync(fd);
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+      throw error;
+    }
+    return targetPath;
+  }
+
+  saveUploadedFile(fileName, data, profileId = 'prof_default') {
+    const safeName = path.basename(String(fileName || 'upload')).replace(/[^a-zA-Z0-9._-]/g, '_').slice(-120) || 'upload';
+    return this._writeSourceFile(profileId, `${Date.now()}_${crypto.randomUUID()}_${safeName}`, data);
   }
 
   // ==========================================
@@ -75,7 +111,7 @@ class StudyService {
       throw new Error(`Studybook "${studybookId}" not found for this profile.`);
     }
 
-    const resolved = path.resolve(filePath);
+    const resolved = this.sourcesGuard.resolveSafePath(filePath);
     if (!fs.existsSync(resolved)) {
       throw new Error(`File does not exist: ${resolved}`);
     }
@@ -161,7 +197,7 @@ class StudyService {
     const fileName = `${sanitizedTitle}_${hash}.md`;
     const targetPath = path.join(this._getProfileSourcesDir(profileId), fileName);
 
-    fs.writeFileSync(targetPath, cleanMarkdown, 'utf8');
+    this._writeSourceFile(profileId, fileName, Buffer.from(cleanMarkdown, 'utf8'));
 
     // Ingest into unified Knowledge Base
     const result = await this.knowledgeService.importFile(targetPath, {
@@ -208,7 +244,7 @@ class StudyService {
     const targetPath = path.join(this._getProfileSourcesDir(profileId), fileName);
 
     const docContent = `# ${cleanTitle}\n\n*Created on ${new Date().toLocaleString()}*\n\n---\n\n${text.trim()}\n`;
-    fs.writeFileSync(targetPath, docContent, 'utf8');
+    this._writeSourceFile(profileId, fileName, Buffer.from(docContent, 'utf8'));
 
     // Ingest into unified Knowledge Base
     const result = await this.knowledgeService.importFile(targetPath, {

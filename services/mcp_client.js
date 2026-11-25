@@ -7,8 +7,10 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 const { runSilentProcess } = require('./silent_process');
+const McpStdioManager = require('./mcp_stdio_manager');
+const { validateSchemaDefinition } = require('../agent/tool_registry');
+const credentialStore = require('../security/credential_store');
 
 let db = null;
 let obsidianVault = null;
@@ -16,6 +18,17 @@ try { db = require('../db'); } catch (e) {}
 try { obsidianVault = require('./obsidian_vault'); } catch (e) {}
 
 const CONFIG_PATH = path.join(__dirname, '..', 'mcp_config.json');
+const transportManager = new McpStdioManager();
+const transportBindings = new Map();
+process.once('exit', () => transportManager.terminateAll());
+
+function transportKey(profileId, serverId) {
+  return `${String(profileId || 'prof_default').replace(/[^a-zA-Z0-9_-]/g, '_')}_${serverId}`;
+}
+
+function qualifiedToolId(serverId, toolName) {
+  return `mcp.${serverId}.${Buffer.from(toolName, 'utf8').toString('hex')}`;
+}
 
 // Default MCP Configuration
 function defaultConfig() {
@@ -57,23 +70,6 @@ const MCP_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'calculate_or_eval',
-      description: 'Execute a Python script or high-precision mathematical calculation. Use this whenever asked to calculate complex math, statistics, verify proofs, or execute algorithms.',
-      parameters: {
-        type: 'object',
-        properties: {
-          code: {
-            type: 'string',
-            description: 'The Python 3 code to execute. Must print the final computed answer to standard output.'
-          }
-        },
-        required: ['code']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
       name: 'search_living_memory',
       description: 'Search long-term memory records and Obsidian Second Brain notes for user preferences, facts, past conversations, and project files.',
       parameters: {
@@ -93,134 +89,6 @@ const MCP_TOOLS = [
 // Cached GPU info to avoid synchronous subprocess spawning on repeated telemetry
 let cachedGpuInfo = null;
 let lastGpuCheck = 0;
-
-/**
- * Execute system_info
- */
-async function executeSystemInfo() {
-  const cpus = os.cpus();
-  const totalMemGB = (os.totalmem() / (1024 ** 3)).toFixed(2);
-  const freeMemGB = (os.freemem() / (1024 ** 3)).toFixed(2);
-  
-  const now = Date.now();
-  if (!cachedGpuInfo || (now - lastGpuCheck > 60000)) {
-    lastGpuCheck = now;
-    runSilentProcess('nvidia-smi', ['--query-gpu=name,memory.total,memory.free,driver_version', '--format=csv,noheader,nounits'], { timeoutMs: 2500 })
-      .then(res => {
-        if (res.ok && res.stdout) {
-          const parts = res.stdout.trim().split(',').map(s => s.trim());
-          if (parts.length >= 4) {
-            cachedGpuInfo = `GPU: ${parts[0]} | Total VRAM: ${parts[1]} MB | Free VRAM: ${parts[2]} MB | Driver: ${parts[3]}`;
-          }
-        }
-      })
-      .catch(() => {});
-  }
-
-  return {
-    platform: `${os.type()} ${os.release()} (${os.arch()})`,
-    cpu: cpus.length ? `${cpus[0].model} (${cpus.length} cores)` : 'Unknown CPU',
-    memory: {
-      total: `${totalMemGB} GB`,
-      free: `${freeMemGB} GB`,
-      used_percent: `${(((os.totalmem() - os.freemem()) / os.totalmem()) * 100).toFixed(1)}%`
-    },
-    gpu: cachedGpuInfo || 'GPU: Dedicated Hardware Acceleration Active',
-    uptime_hours: (os.uptime() / 3600).toFixed(1),
-    timestamp: new Date().toISOString()
-  };
-}
-
-/**
- * Execute calculate_or_eval safely using in-process sandbox with timeout
- */
-async function executeCalculateOrEval(code) {
-  if (!code || typeof code !== 'string') {
-    return { error: 'Missing or invalid code string' };
-  }
-
-  const trimmed = code.trim();
-
-  // 1. Fast in-process Python/Datetime/Timezone interceptor (0ms, 0 subprocesses, 0 window popups)
-  if (/datetime|pytz|date\.today|datetime\.now/i.test(trimmed)) {
-    let targetTz = 'UTC';
-    if (/portugal|lisbon|europe\/lisbon/i.test(trimmed)) targetTz = 'Europe/Lisbon';
-    else if (/madrid|spain/i.test(trimmed)) targetTz = 'Europe/Madrid';
-    else if (/london|uk|gmt/i.test(trimmed)) targetTz = 'Europe/London';
-    else if (/paris|france/i.test(trimmed)) targetTz = 'Europe/Paris';
-    else if (/berlin|germany/i.test(trimmed)) targetTz = 'Europe/Berlin';
-    else if (/tokyo|japan/i.test(trimmed)) targetTz = 'Asia/Tokyo';
-    else if (/new_york|est|edt/i.test(trimmed)) targetTz = 'America/New_York';
-    else if (/los_angeles|pst|pdt/i.test(trimmed)) targetTz = 'America/Los_Angeles';
-
-    const now = new Date();
-    try {
-      const timeStr = now.toLocaleTimeString('en-US', { timeZone: targetTz, hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
-      const dateStr = now.toLocaleDateString('en-US', { timeZone: targetTz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-      return {
-        success: true,
-        output: `${timeStr} (${targetTz}) on ${dateStr}`
-      };
-    } catch (_) {}
-  }
-
-  // 2. Fast in-process JavaScript/Math evaluation: 0ms startup, 0 terminal popups
-  try {
-    const logs = [];
-    const sandbox = {
-      Math,
-      Number,
-      BigInt,
-      String,
-      Array,
-      Object,
-      Date,
-      Intl,
-      RegExp,
-      JSON,
-      console: {
-        log: (...args) => logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')),
-        error: (...args) => logs.push(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '))
-      },
-      parseInt,
-      parseFloat,
-      isFinite,
-      isNaN
-    };
-    const wrappedScript = `
-      let __result;
-      try {
-        __result = (${trimmed});
-      } catch(__e) {
-        ${trimmed}
-        __result = typeof result !== 'undefined' ? result : (typeof output !== 'undefined' ? output : (typeof logs !== 'undefined' && logs.length ? logs.join('\\n') : 'Done'));
-      }
-      __result;
-    `;
-    const res = vm.runInNewContext(wrappedScript, sandbox, { timeout: 2000 });
-    const outputVal = logs.length ? logs.join('\n') : (res !== undefined ? String(res) : '(Code executed with no output)');
-    return {
-      success: true,
-      output: outputVal
-    };
-  } catch (jsErr) {
-    // 3. Fallback: Silent runner that guarantees zero Windows Terminal / conhost console window popup
-    try {
-      const res = await runSilentProcess('python', ['-c', code], { timeoutMs: 4000 });
-      if (res.ok) {
-        return {
-          success: true,
-          output: res.stdout || '(Executed with no output)'
-        };
-      }
-      return {
-        error: res.stderr || jsErr.message
-      };
-    } catch (subErr) {
-      return { error: subErr.message || jsErr.message };
-    }
-  }
-}
 
 /**
  * Execute search_living_memory
@@ -277,11 +145,10 @@ async function executeSearchLivingMemory(query, profileId = 'prof_default') {
  * Dispatch tool execution
  */
 async function executeTool(name, args = {}, profileId = 'prof_default') {
+  if (name === 'calculate_or_eval') return { success: false, denied: true, error: 'Arbitrary code execution is disabled; it is not an MCP capability.' };
   switch (name) {
     case 'system_info':
       return await executeSystemInfo();
-    case 'calculate_or_eval':
-      return await executeCalculateOrEval(args.code);
     case 'search_living_memory':
       return await executeSearchLivingMemory(args.query, profileId);
     default:
@@ -306,19 +173,16 @@ function getAllTools(profileId = 'prof_default') {
   if (cfg && cfg.mcpServers) {
     for (const [srvName, srv] of Object.entries(cfg.mcpServers)) {
       if (srvName === 'local_tools' || srv.disabled || srv.enabled === false) continue;
-      if (Array.isArray(srv.tools)) {
-        for (const t of srv.tools) {
-          if (t && t.name) {
-            tools.push({
-              type: 'function',
-              function: {
-                name: t.name,
-                description: t.description || `Tool from ${srvName} MCP server`,
-                parameters: t.parameters || { type: 'object', properties: {} }
-              }
-            });
+      const binding = transportBindings.get(transportKey(profileId, srvName));
+      if (binding?.tools) {
+        for (const tool of binding.tools) tools.push({
+          type: 'function',
+          function: {
+            name: qualifiedToolId(srvName, tool.name),
+            description: `[MCP ${srvName}] ${tool.description}`.slice(0, 2000),
+            parameters: tool.inputSchema
           }
-        }
+        });
       }
     }
   }
@@ -326,11 +190,24 @@ function getAllTools(profileId = 'prof_default') {
 }
 
 function addServer(name, serverConfig, profileId = 'prof_default') {
+  if (!/^[a-z0-9_-]{2,64}$/.test(name)) throw new Error('Invalid MCP server id');
+  if (!serverConfig || typeof serverConfig !== 'object' || Array.isArray(serverConfig)) throw new Error('MCP server configuration must be an object');
+  if (serverConfig.env && Object.keys(serverConfig.env).length) throw new Error('Plaintext environment variables are not stored in MCP configuration');
+  if (serverConfig.envSecretRefs && (!serverConfig.envSecretRefs || typeof serverConfig.envSecretRefs !== 'object' || Array.isArray(serverConfig.envSecretRefs) || Object.entries(serverConfig.envSecretRefs).some(([key, ref]) => !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) || typeof ref !== 'string' || !/^[a-zA-Z0-9._-]{1,128}$/.test(ref)))) throw new Error('MCP environment secret references are invalid');
+  if (serverConfig.transport && serverConfig.transport !== 'stdio') throw new Error('Only MCP stdio transport is currently supported');
+  if (typeof serverConfig.command !== 'string' || !serverConfig.command.trim() || serverConfig.command.length > 1024) throw new Error('MCP stdio server command is required and must be bounded');
+  if (serverConfig.args !== undefined && (!Array.isArray(serverConfig.args) || serverConfig.args.length > 128 || serverConfig.args.some(arg => typeof arg !== 'string' || arg.length > 4096 || /[\0\r\n]/.test(arg)))) throw new Error('MCP server args must be a bounded string array');
+  if (serverConfig.grantedPermissions !== undefined && (!Array.isArray(serverConfig.grantedPermissions) || serverConfig.grantedPermissions.some(permission => typeof permission !== 'string'))) throw new Error('MCP permissions must be an explicit string array');
   const cfg = loadConfig(profileId);
   cfg.mcpServers = cfg.mcpServers || {};
+  if (cfg.mcpServers[name]) throw new Error(`MCP server "${name}" is already configured`);
   cfg.mcpServers[name] = {
     enabled: true,
-    ...serverConfig
+    transport: 'stdio',
+    executionApproved: false,
+    ...serverConfig,
+    env: undefined,
+    tools: []
   };
   saveConfig(cfg, profileId);
   return { ok: true, server: cfg.mcpServers[name] };
@@ -345,12 +222,15 @@ function toggleServer(name, enabled, profileId = 'prof_default') {
   if (!enabled) cfg.mcpServers[name].disabled = true;
   else delete cfg.mcpServers[name].disabled;
   saveConfig(cfg, profileId);
+  if (!enabled) transportManager.disconnect(transportKey(profileId, name)).catch(() => {});
   return { ok: true, server: cfg.mcpServers[name] };
 }
 
 function deleteServer(name, profileId = 'prof_default') {
   const cfg = loadConfig(profileId);
   if (cfg.mcpServers && cfg.mcpServers[name]) {
+    transportManager.disconnect(transportKey(profileId, name)).catch(() => {});
+    transportBindings.delete(transportKey(profileId, name));
     delete cfg.mcpServers[name];
     saveConfig(cfg, profileId);
   }
@@ -359,6 +239,74 @@ function deleteServer(name, profileId = 'prof_default') {
 
 function isMcpTool(name, profileId = 'prof_default') {
   return getAllTools(profileId).some(t => t.function?.name === name);
+}
+
+async function connectServer(name, profileId = 'prof_default', { executionApproved = false, signal } = {}) {
+  const cfg = loadConfig(profileId);
+  const server = cfg.mcpServers?.[name];
+  if (!server || server.enabled === false || server.disabled) throw new Error(`MCP server "${name}" is not enabled`);
+  if (executionApproved !== true) throw new Error('Confirm that this MCP server process may run with your account permissions');
+  server.executionApproved = true;
+  saveConfig(cfg, profileId);
+  const resolvedSecretEnv = {};
+  for (const [key, ref] of Object.entries(server.envSecretRefs || {})) {
+    const secret = credentialStore.getSecret(profileId, ref);
+    if (!secret) throw new Error(`MCP secret reference "${ref}" is not available in the credential store`);
+    resolvedSecretEnv[key] = secret;
+  }
+  const key = transportKey(profileId, name);
+  const result = await transportManager.connect(key, { ...server, executionApproved: true, resolvedSecretEnv }, { signal });
+  const binding = { serverId: name, transportKey: key, tools: result.tools };
+  transportBindings.set(key, binding);
+  return { server: { name, status: result.status }, tools: result.tools.map(tool => ({ id: qualifiedToolId(name, tool.name), name: tool.name, description: tool.description, inputSchema: tool.inputSchema })) };
+}
+
+async function disconnectServer(name, profileId = 'prof_default') {
+  transportBindings.delete(transportKey(profileId, name));
+  return transportManager.disconnect(transportKey(profileId, name));
+}
+
+function getServerStatuses(profileId = 'prof_default') {
+  const cfg = loadConfig(profileId);
+  return Object.fromEntries(Object.entries(cfg.mcpServers || {}).map(([name, server]) => [name, {
+    configured: true,
+    enabled: server.enabled !== false && !server.disabled,
+    status: transportManager.status(transportKey(profileId, name)).status,
+    executionApproved: server.executionApproved === true,
+    transport: server.transport || 'unconfigured'
+  }]));
+}
+
+function registerConnectedTools(registry, profileId = 'prof_default') {
+  const cfg = loadConfig(profileId);
+  const registered = [];
+  for (const tool of registry.list()) {
+    if (tool.provenance?.source?.startsWith('mcp:')) registry.unregister(tool.id);
+  }
+  for (const [name, server] of Object.entries(cfg.mcpServers || {})) {
+    const key = transportKey(profileId, name);
+    const binding = transportBindings.get(key);
+    if (!binding || server.enabled === false || server.disabled) continue;
+    for (const tool of binding.tools) {
+      const id = qualifiedToolId(name, tool.name);
+      validateSchemaDefinition(tool.inputSchema, `MCP ${name}.${tool.name}`);
+      registry.register({
+        id,
+        version: '1.0.0',
+        description: `[MCP ${name}] ${tool.description || tool.name}`,
+        inputSchema: tool.inputSchema,
+        riskCategory: 'external',
+        permissions: Array.isArray(server.toolPermissions?.[tool.name]) ? server.toolPermissions[tool.name] : ['mcp:call'],
+        grantedPermissions: Array.isArray(server.grantedPermissions) ? server.grantedPermissions : [],
+        timeoutMs: Math.min(Math.max(Number(server.timeoutMs) || 30000, 1000), 120000),
+        maxOutputBytes: Math.min(Math.max(Number(server.maxOutputBytes) || 65536, 1024), 1024 * 1024),
+        provenance: { source: `mcp:${name}`, trustLevel: 'explicitly-approved-external', serverId: name },
+        execute: (args, context) => transportManager.callTool(key, tool.name, args, { signal: context.signal, timeoutMs: server.timeoutMs })
+      });
+      registered.push(id);
+    }
+  }
+  return registered;
 }
 
 module.exports = {
@@ -370,5 +318,11 @@ module.exports = {
   saveConfig,
   addServer,
   toggleServer,
-  deleteServer
+  deleteServer,
+  connectServer,
+  disconnectServer,
+  getServerStatuses,
+  registerConnectedTools,
+  qualifiedToolId,
+  transportManager
 };

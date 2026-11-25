@@ -1,0 +1,18 @@
+{
+  "audit_date": "2026-11-25",
+  "project_path": "C:\\Users\\abira\\Documents\\Local Ai studio Abyx",
+  "project_head": "4e7d59e9851b4da09489ebcafe2a8541bb6e03cf",
+  "competitors": [
+    {"name":"OpenCode","repository":"https://github.com/anomalyco/opencode","branch":"dev","commit":"not independently pinned at audit date; public commit history snapshot exposed 95daf90 (2026-09-11)"},
+    {"name":"Pi Coding Agent","repository":"https://github.com/badlogic/pi-mono","canonical_repository":"https://github.com/earendil-works/pi","branch":"main","commit":"not independently pinned at audit date; public commit history snapshot exposed 71dca87 (2026-09-11)"},
+    {"name":"DeepSeek Harness","repository":"https://github.com/deepseek-ai/deepseek-harness","branch":"master","commit":"not independently pinned at audit date; public commit history snapshot exposed c291e79 (2026-09-10)"}
+  ],
+  "research_scope":"Static source and documentation review of agent, harness, provider, tool, MCP, extension, RAG, automation, security, server, database and React interface paths; public primary-source repository/documentation research for all three competitors.",
+  "files_catalogued":183,
+  "files_inspected_in_depth":"25 Abyx source/config files were read directly for execution-path analysis; the 183-file non-dependency/non-generated project inventory was catalogued and cross-referenced by targeted symbol/route searches. A full line-by-line review of every catalogued file was not completed. Generated artifacts, dependencies and opaque binaries were not treated as source.",
+  "files_excluded":"Installed app/frontend/node_modules (third-party dependencies), app/dist (generated bundle), .git internals, archive abyx_frontend.zip, binary icon/image/ODT assets and high-volume project logs; directories and presence were catalogued. They are excluded because they do not establish active application source behavior or require specialized extraction/runtime inspection.",
+  "tests_performed":[],
+  "tests_not_performed":["Existing test suites not executed","No UI launched or accessibility/device testing performed","No competitor benchmark executions","No provider/API calls or model inference"],
+  "known_limitations":["Competitor default branches are mutable; exact audit-date commit SHAs were not independently pinned. Short SHAs are historical snapshot references only.","No runtime execution, dependency audit, threat-model exercise, or hardware performance measurement was performed.","Abyx had a dirty working tree before audit; findings include pre-existing edits and cannot be attributed to the committed HEAD alone.","Several status classifications are static-source confidence, not runtime verification."],
+  "research_confidence":"High for inspected static call paths and directly visible behavior; medium for broad subsystem coverage; low for runtime reliability/performance and claims that require execution."
+}

@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const os = require('node:os');
+const crypto = require('node:crypto');
 const { dataDir } = require('../data_paths');
 const { runSilentProcess } = require('./silent_process');
 const workspaceService = require('./workspace_service');
@@ -20,6 +21,36 @@ const workspaceRoot = () => {
   return root;
 };
 const getPathGuard = () => new PathGuard(workspaceRoot());
+
+function writeWorkspaceFile(target, data, encoding = null) {
+  const guard = getPathGuard();
+  const safeTarget = guard.resolveSafePath(target, { allowCreate: true });
+  const parent = path.dirname(safeTarget);
+  if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
+  if (guard.resolveSafePath(target, { allowCreate: true }) !== safeTarget) throw new Error('File target changed during validation');
+  const temp = path.join(parent, `.abyx-${crypto.randomUUID()}.tmp`);
+  let fd;
+  try {
+    fd = fs.openSync(temp, 'wx', 0o600);
+    if (encoding) fs.writeFileSync(fd, data, encoding);
+    else fs.writeFileSync(fd, data);
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = null;
+    if (guard.resolveSafePath(target, { allowCreate: true }) !== safeTarget) throw new Error('File target failed final validation');
+    fs.renameSync(temp, safeTarget);
+  } catch (error) {
+    if (fd !== null && fd !== undefined) fs.closeSync(fd);
+    try { fs.unlinkSync(temp); } catch (_) {}
+    throw error;
+  }
+  return safeTarget;
+}
+
+function removeWorkspaceFile(target) {
+  const safeTarget = getPathGuard().resolveSafePath(target);
+  if (fs.existsSync(safeTarget)) fs.unlinkSync(safeTarget);
+}
 
 /**
  * Safely resolves target paths with Desktop and workspace aliases, guarded against path traversal and secret access
@@ -124,7 +155,9 @@ async function generateFile({
   const targetPath = resolveSafePath(filePath);
   const targetDir = path.dirname(targetPath);
   if (!fs.existsSync(targetDir)) {
+    getPathGuard().resolveSafePath(targetPath, { allowCreate: true });
     fs.mkdirSync(targetDir, { recursive: true });
+    getPathGuard().resolveSafePath(targetPath, { allowCreate: true });
   }
 
   const ext = path.extname(targetPath).toLowerCase();
@@ -136,11 +169,14 @@ async function generateFile({
     const docTitle = title || path.basename(targetPath, path.extname(targetPath)).replace(/[-_]/g, ' ');
     
     // Write temp payload file to avoid PowerShell argument length & quote escaping limits
-    const tempPayloadPath = path.join(workspaceRoot(), `temp_pdf_${Date.now()}.json`);
+    const tempPayloadPath = path.join(workspaceRoot(), `temp_pdf_${crypto.randomUUID()}.json`);
     const payloadDir = path.dirname(tempPayloadPath);
-    if (!fs.existsSync(payloadDir)) fs.mkdirSync(payloadDir, { recursive: true });
+    if (!fs.existsSync(payloadDir)) {
+      getPathGuard().resolveSafePath(tempPayloadPath, { allowCreate: true });
+      fs.mkdirSync(payloadDir, { recursive: true });
+    }
 
-    fs.writeFileSync(tempPayloadPath, JSON.stringify({
+    writeWorkspaceFile(tempPayloadPath, JSON.stringify({
       output: targetPath,
       title: docTitle,
       author: author || 'AXOM Intelligence',
@@ -149,7 +185,7 @@ async function generateFile({
 
     try {
       const res = await runPythonScript(pdfScript, ['--json', tempPayloadPath]);
-      try { fs.unlinkSync(tempPayloadPath); } catch (_) {}
+      try { removeWorkspaceFile(tempPayloadPath); } catch (_) {}
       
       const stats = fs.statSync(targetPath);
       const alias = getRelativeAlias(targetPath);
@@ -165,7 +201,7 @@ async function generateFile({
         message: `Successfully generated PDF document (${stats.size} bytes) at: ${alias}`
       };
     } catch (err) {
-      try { fs.unlinkSync(tempPayloadPath); } catch (_) {}
+      try { removeWorkspaceFile(tempPayloadPath); } catch (_) {}
       throw err;
     }
   }
@@ -179,14 +215,19 @@ async function generateFile({
       archiveTargetPath = targetPath.replace(/\.rar$/i, '.zip');
     }
 
-    const tempJsonPath = path.join(workspaceRoot(), `temp_archive_${Date.now()}.json`);
+    const tempJsonPath = path.join(workspaceRoot(), `temp_archive_${crypto.randomUUID()}.json`);
     const payloadDir = path.dirname(tempJsonPath);
-    if (!fs.existsSync(payloadDir)) fs.mkdirSync(payloadDir, { recursive: true });
+    if (!fs.existsSync(payloadDir)) {
+      getPathGuard().resolveSafePath(tempJsonPath, { allowCreate: true });
+      fs.mkdirSync(payloadDir, { recursive: true });
+    }
 
     let args = ['--output', archiveTargetPath];
 
     if (sourceDir && fs.existsSync(sourceDir)) {
-      args.push('--source-dir', sourceDir);
+      const safeSourceDir = getPathGuard().resolveSafePath(sourceDir);
+      if (!fs.statSync(safeSourceDir).isDirectory()) throw new Error('Archive source must be a workspace directory');
+      args.push('--source-dir', safeSourceDir);
     } else {
       let entries = [];
       if (Array.isArray(files) && files.length > 0) {
@@ -202,13 +243,13 @@ async function generateFile({
           content: 'Created by AXOM Archive Engine'
         }];
       }
-      fs.writeFileSync(tempJsonPath, JSON.stringify(entries), 'utf8');
+      writeWorkspaceFile(tempJsonPath, JSON.stringify(entries), 'utf8');
       args.push('--json', tempJsonPath);
     }
 
     try {
       await runPythonScript(archiveScript, args);
-      try { if (fs.existsSync(tempJsonPath)) fs.unlinkSync(tempJsonPath); } catch (_) {}
+      try { removeWorkspaceFile(tempJsonPath); } catch (_) {}
 
       const stats = fs.statSync(archiveTargetPath);
       const alias = getRelativeAlias(archiveTargetPath);
@@ -224,7 +265,7 @@ async function generateFile({
         message: `Successfully generated archive (${stats.size} bytes) at: ${alias}`
       };
     } catch (err) {
-      try { if (fs.existsSync(tempJsonPath)) fs.unlinkSync(tempJsonPath); } catch (_) {}
+      try { removeWorkspaceFile(tempJsonPath); } catch (_) {}
       throw err;
     }
   }
@@ -232,7 +273,7 @@ async function generateFile({
   // 3. Binary / Base64 Data
   if (base64Data) {
     const buf = Buffer.from(base64Data, 'base64');
-    fs.writeFileSync(targetPath, buf);
+    writeWorkspaceFile(targetPath, buf);
     const stats = fs.statSync(targetPath);
     const alias = getRelativeAlias(targetPath);
     return {
@@ -249,7 +290,7 @@ async function generateFile({
   }
 
   // 4. Standard Text, HTML, Code, Markdown, CSV, JSON
-  fs.writeFileSync(targetPath, content || '', 'utf8');
+  writeWorkspaceFile(targetPath, content || '', 'utf8');
   const stats = fs.statSync(targetPath);
   const alias = getRelativeAlias(targetPath);
 

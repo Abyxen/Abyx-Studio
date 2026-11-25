@@ -10,10 +10,9 @@
 
 <p align="center">
   <a href="#license"><img src="https://img.shields.io/badge/License-MIT-orange?style=for-the-badge" alt="License" /></a>
-  <a href="#quick-start"><img src="https://img.shields.io/badge/Offline-100%25%20Local%20First-green?style=for-the-badge" alt="100% Local First" /></a>
+  <a href="#quick-start"><img src="https://img.shields.io/badge/Mode-Local%20First-green?style=for-the-badge" alt="Local First" /></a>
   <a href="#hardware-acceleration"><img src="https://img.shields.io/badge/Hardware-CUDA%20%7C%20Vulkan%20%7C%20ROCm%20%7C%20Metal-blue?style=for-the-badge" alt="Hardware Acceleration" /></a>
   <a href="#quick-start"><img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blueviolet?style=for-the-badge" alt="Multi-Platform" /></a>
-  <a href="https://github.com/Abyxen/Abyx-Studio"><img src="https://img.shields.io/badge/Status-Production%20Ready-emerald?style=for-the-badge" alt="Production Ready" /></a>
 </p>
 
 <p align="center">
@@ -90,7 +89,7 @@
 - 🎙️ **Speech Recognition:** Transcribe speech directly from your microphone using Whisper.
 - 🗣️ **Neural Voice Synthesis:** Convert text into lifelike vocal audio with Kokoro TTS.
 
-...all **100% private, offline, and subscription-free**.
+...with local inference available after the required runtimes and model files are installed. Cloud providers and online research features send requests to their selected services.
 
 When a task requires massive multi-modal reasoning beyond local hardware, Abyx Studio can seamlessly route it to top-tier cloud models (Google Gemini 2.0, Claude 3.5/3.7, DeepSeek-R1, OpenAI o3-mini) using your own free or custom API keys.
 
@@ -98,7 +97,7 @@ When a task requires massive multi-modal reasoning beyond local hardware, Abyx S
 
 | | |
 | :--- | :--- |
-| 🔒 **Private by default** | Everything runs on your machine. Cloud is opt-in. |
+| 🔒 **Local-first choices** | Local inference stays on this machine; cloud models and online research send requests to the selected services. |
 | ⚡ **Zero setup** | No pre-installed Node.js or Python required. One launcher does it all. |
 | 🧩 **All-in-one** | Chat, code, images, speech, and voice in a single unified desktop app. |
 | 🎛️ **Hardware-aware** | Auto-detects your GPU (NVIDIA CUDA, AMD ROCm/Vulkan, Intel, Apple Metal) and picks the best backend. |
@@ -150,7 +149,7 @@ When a task requires massive multi-modal reasoning beyond local hardware, Abyx S
 
 ## <a id="system-architecture"></a>🏗️ System Architecture & Stack
 
-Heavy neural computation runs in isolated native processes managed by an asynchronous Node.js coordination daemon, so GPU work never blocks the UI.
+Heavy neural computation runs in separate native processes managed by an asynchronous Node.js coordinator, so GPU work does not block the UI. Process separation does not provide an operating-system security sandbox.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -179,7 +178,7 @@ Heavy neural computation runs in isolated native processes managed by an asynchr
 | **Frontend** | React 19, Vite, Lucide Icons, KaTeX, CSS3 | Fast, reactive dark-mode UI with live token streaming and LaTeX math rendering |
 | **Backend** | Node.js (v22 LTS), Server-Sent Events, Child Processes | Asynchronous process supervisor, directive parsing, and file manager |
 | **Data Storage** | SQLite (`better-sqlite3`), JSON | Zero-configuration local database for chats, telemetry, and memory |
-| **AI Runtimes** | `llama.cpp`, `stable-diffusion.cpp`, `whisper.cpp`, `kokoro-js` | Isolated C++ & ONNX engines running hardware-accelerated local inferences |
+| **AI Runtimes** | `llama.cpp`, `stable-diffusion.cpp`, `whisper.cpp`, `kokoro-js` | Separate C++ and ONNX processes for local inference; process separation is not OS security isolation |
 
 ---
 
@@ -195,7 +194,7 @@ Abyx Studio needs **no pre-installed Node.js, Python, or other dependencies**. E
 | **GPU** | None (CPU mode works) | 8 GB+ VRAM (NVIDIA RTX, AMD Radeon, or Apple M-series) |
 | **RAM** | 8 GB | 16 GB+ |
 | **Disk** | 2 GB for app & backends | 15 GB+ for model weights |
-| **Internet** | Needed once for first setup & model downloads | Optional afterward (100% offline) |
+| **Internet** | Needed for setup, model downloads, online search, updates and cloud providers | Local inference can work offline after runtimes and models are installed |
 
 ### 🪟 Windows Setup
 
@@ -389,12 +388,16 @@ Abyx-Studio/
 
 ## <a id="privacy--security"></a>🔐 Privacy & Security
 
-- **Local-first:** in local mode, prompts, files, and generations never leave your machine.
-- **Cloud is opt-in:** data is sent to a provider only when you select a cloud model.
-- **Keys stay local:** API keys are stored in local memory, not uploaded anywhere by Abyx.
-- **Sandbox Guardrails:** the `security/` module provides path guards and execution policies, while generated code runs through the `harness/` sandbox.
-- **LAN sharing:** exposing Abyx with `UAIS_HOST=0.0.0.0` makes it reachable by other devices on your network. Only do this on trusted networks.
-- **Zero data leakage:** model weights, personal databases, and chat histories are protected via `.gitignore`.
+- **Local-first:** local inference runs on this machine. Model downloads, online search, updates, and explicitly selected cloud providers require network access.
+- **Cloud providers:** prompts and attachments sent to a cloud model are transmitted to that provider. Review its privacy terms before using sensitive data.
+- **Credentials:** Abyx stores provider credentials locally. When a cloud provider is selected, its API request necessarily includes the corresponding credential.
+- **Execution boundary:** arbitrary provider code is disabled. Approved terminal commands run with the current user's permissions and are not OS-isolated. The Node.js `vm` is not a security sandbox.
+- **Local API:** the service binds to loopback and validates browser request origins. It does not authenticate another local process running as the same user.
+- **Data files:** model weights, databases, and chat histories are stored locally and ignored by Git where configured. `.gitignore` is not an access-control or encryption boundary.
+
+## Implementation and validation status
+
+The current final-state review is recorded in [`IMPLEMENTATION/STAGE_7_FINAL_VALIDATION_REPORT.md`](IMPLEMENTATION/STAGE_7_FINAL_VALIDATION_REPORT.md). The [feature matrix](IMPLEMENTATION/FINAL_FEATURE_MATRIX.md), [architecture snapshot](IMPLEMENTATION/FINAL_ARCHITECTURE.md), [security report](IMPLEMENTATION/FINAL_SECURITY_REPORT.md), [benchmarks](IMPLEMENTATION/FINAL_BENCHMARKS.md), and [known limitations](IMPLEMENTATION/KNOWN_LIMITATIONS.md) distinguish implemented capabilities from partial or unverified behavior. Full runtime, provider, recovery, process-isolation and live UI acceptance has not been established.
 
 ---
 
@@ -427,7 +430,7 @@ Abyx-Studio/
 
 <details>
   <summary><strong>Does it work without internet?</strong></summary>
-  <p>Yes. After the first-run setup and your model downloads, all local features work fully offline. Only cloud models need an active connection.</p>
+  <p>Local inference can work offline after setup and model downloads. Online search, updates and selected cloud providers need an active connection.</p>
 </details>
 
 ---

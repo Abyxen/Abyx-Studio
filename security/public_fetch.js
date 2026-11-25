@@ -42,8 +42,9 @@ async function resolvePublicHost(hostname) {
   return addresses;
 }
 
-function requestPinned(url, addresses, { timeoutMs = 15000, maxBytes = 8 * 1024 * 1024, headers = {} } = {}) {
+function requestPinned(url, addresses, { timeoutMs = 15000, maxBytes = 8 * 1024 * 1024, headers = {}, signal = null } = {}) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason || new Error('Request cancelled'));
     const transport = url.protocol === 'https:' ? https : http;
     const chosen = addresses[0];
     const hostname = url.hostname.replace(/^\[|\]$/g, '');
@@ -75,6 +76,9 @@ function requestPinned(url, addresses, { timeoutMs = 15000, maxBytes = 8 * 1024 
       res.on('error', reject);
     });
     req.setTimeout(timeoutMs, () => req.destroy(new Error('Remote request timed out')));
+    const onAbort = () => req.destroy(signal.reason instanceof Error ? signal.reason : new Error('Request cancelled'));
+    signal?.addEventListener('abort', onAbort, { once: true });
+    req.on('close', () => signal?.removeEventListener('abort', onAbort));
     req.on('error', reject);
     req.end();
   });
@@ -84,6 +88,7 @@ async function fetchPublicUrl(input, options = {}) {
   const maxRedirects = Math.min(Math.max(options.maxRedirects ?? 4, 0), 8);
   let url = new URL(input);
   for (let redirects = 0; redirects <= maxRedirects; redirects++) {
+    if (options.signal?.aborted) throw options.signal.reason || new Error('Request cancelled');
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
       throw new Error('Only public HTTP and HTTPS URLs without credentials are allowed');
     }

@@ -1,120 +1,70 @@
-/**
- * ABYX Silent Subprocess Runner
- * Guarantees 0ms terminal window popup on Windows 11/10 (including Windows Terminal interception bypass).
- * Uses WScript.Shell.Run with SW_HIDE (0) on Windows to ensure CREATE_NO_WINDOW.
- */
+'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
-const os = require('node:os');
-const { execFile, spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 
-function runSilentProcess(cmd, args = [], options = {}) {
-  const timeoutMs = options.timeoutMs || 10000;
-  const cwd = options.cwd || process.cwd();
-
-  if (process.platform !== 'win32') {
-    return new Promise((resolve) => {
-      const child = spawn(cmd, args, {
-        cwd,
-        env: { ...process.env, ...options.env }
-      });
-      let stdout = '';
-      let stderr = '';
-      let killed = false;
-
-      const timer = setTimeout(() => {
-        killed = true;
-        try { child.kill('SIGKILL'); } catch (_) {}
-      }, timeoutMs);
-
-      child.stdout?.on('data', d => { if (stdout.length < 100000) stdout += d.toString(); });
-      child.stderr?.on('data', d => { if (stderr.length < 100000) stderr += d.toString(); });
-
-      child.on('close', code => {
-        clearTimeout(timer);
-        resolve({
-          ok: code === 0 && !killed,
-          exitCode: code ?? (killed ? 137 : 0),
-          stdout: stdout.trim(),
-          stderr: stderr.trim(),
-          killed
-        });
-      });
-
-      child.on('error', err => {
-        clearTimeout(timer);
-        resolve({
-          ok: false,
-          exitCode: 1,
-          stdout: '',
-          stderr: err.message,
-          killed: false
-        });
-      });
-    });
+function runSilentProcess(command, args = [], options = {}) {
+  if (typeof command !== 'string' || !command || !Array.isArray(args) || args.some(arg => typeof arg !== 'string')) {
+    return Promise.resolve({ ok: false, exitCode: 1, stdout: '', stderr: 'Invalid process arguments', killed: false });
   }
+  const timeoutMs = Math.min(Math.max(Number(options.timeoutMs) || 10000, 1), 10 * 60 * 1000);
+  const outputLimit = Math.min(Math.max(Number(options.maxOutputBytes) || 100000, 1024), 2 * 1024 * 1024);
+  if (options.signal?.aborted) return Promise.resolve({ ok: false, exitCode: 130, stdout: '', stderr: 'Execution cancelled', killed: true });
 
-  // Windows: WScript.Shell.Run with SW_HIDE (0) guarantees no terminal window or tab is opened
-  return new Promise((resolve) => {
-    const tempDir = os.tmpdir();
-    const id = `_abyx_silent_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const batPath = path.join(tempDir, `${id}.bat`);
-    const vbsPath = path.join(tempDir, `${id}.vbs`);
-    const outPath = path.join(tempDir, `${id}.out`);
-    const errPath = path.join(tempDir, `${id}.err`);
-
-    // Build command line for batch runner
-    const fullCmd = [cmd, ...args.map(a => `"${String(a).replace(/"/g, '""')}"`)].join(' ');
-    const batContent = `@echo off\r\nchcp 65001 >nul\r\ncd /d "${cwd}"\r\n${fullCmd} > "${outPath}" 2> "${errPath}"\r\n`;
-
-    const vbsContent = [
-      'Set s = CreateObject("WScript.Shell")',
-      `s.Run "cmd.exe /c """"${batPath}""""", 0, True`
-    ].join('\r\n');
-
-    try {
-      fs.writeFileSync(batPath, batContent, 'utf8');
-      fs.writeFileSync(vbsPath, vbsContent, 'utf8');
-    } catch (e) {
-      return resolve({ ok: false, exitCode: 1, stdout: '', stderr: e.message, killed: false });
-    }
-
-    let killed = false;
-    const timer = setTimeout(() => {
-      killed = true;
-      cleanup();
-      resolve({ ok: false, exitCode: 124, stdout: '', stderr: 'Execution timed out', killed: true });
-    }, timeoutMs);
-
-    function cleanup() {
-      clearTimeout(timer);
-      try { if (fs.existsSync(batPath)) fs.unlinkSync(batPath); } catch (_) {}
-      try { if (fs.existsSync(vbsPath)) fs.unlinkSync(vbsPath); } catch (_) {}
-      try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch (_) {}
-      try { if (fs.existsSync(errPath)) fs.unlinkSync(errPath); } catch (_) {}
-    }
-
-    execFile('wscript.exe', ['//B', '//Nologo', vbsPath], { timeout: timeoutMs + 1000, windowsHide: true }, (err) => {
-      clearTimeout(timer);
-      let stdout = '';
-      let stderr = '';
-      try { if (fs.existsSync(outPath)) stdout = fs.readFileSync(outPath, 'utf8'); } catch (_) {}
-      try { if (fs.existsSync(errPath)) stderr = fs.readFileSync(errPath, 'utf8'); } catch (_) {}
-      cleanup();
-
-      const exitCode = err ? (err.code || 1) : 0;
-      resolve({
-        ok: exitCode === 0 && !killed,
-        exitCode,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        killed
-      });
+  return new Promise(resolve => {
+    const child = spawn(command, args, {
+      cwd: options.cwd || process.cwd(),
+      env: { ...process.env, ...(options.env || {}) },
+      shell: false,
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe']
     });
+    let stdout = '';
+    let stderr = '';
+    let killed = false;
+    let timedOut = false;
+    let receivedOutputBytes = 0;
+    let settled = false;
+    const killTree = () => {
+      if (!child.pid) return;
+      if (process.platform === 'win32') {
+        const killedTree = spawnSync('taskkill.exe', ['/F', '/PID', String(child.pid), '/T'], { windowsHide: true, stdio: 'ignore', timeout: 5000 });
+        if (killedTree.error || killedTree.status !== 0) { try { child.kill(); } catch (_) {} }
+      } else {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { try { child.kill('SIGKILL'); } catch (_) {} }
+      }
+    };
+    const onAbort = () => { killed = true; killTree(); };
+    const timer = setTimeout(() => { timedOut = true; killed = true; killTree(); }, timeoutMs);
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
+    const collect = (target, chunk) => {
+      const text = chunk.toString('utf8');
+      receivedOutputBytes += chunk.length;
+      if (target === 'stdout') stdout = (stdout + text).slice(-outputLimit);
+      else stderr = (stderr + text).slice(-outputLimit);
+      if (receivedOutputBytes > outputLimit * 2 && !killed) { killed = true; killTree(); }
+    };
+    child.stdout.on('data', chunk => collect('stdout', chunk));
+    child.stderr.on('data', chunk => collect('stderr', chunk));
+    child.once('error', error => finish(null, error));
+    child.once('close', code => finish(code, null));
+
+    function finish(code, error) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', onAbort);
+      resolve({
+        ok: !error && code === 0 && !killed,
+        exitCode: code ?? (timedOut ? 124 : killed ? 130 : 1),
+        stdout: stdout.trim(),
+        stderr: error ? 'Process could not be started' : stderr.trim(),
+        killed,
+        timedOut
+      });
+    }
   });
 }
 
-module.exports = {
-  runSilentProcess
-};
+module.exports = { runSilentProcess };

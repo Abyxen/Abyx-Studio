@@ -51,7 +51,11 @@ export default function TerminalConsole({
     setCommand("");
 
     try {
-      const res = await executeTerminalCommand(cmd, defaultCwd, 20000);
+      let res = await executeTerminalCommand(cmd, defaultCwd, 20000);
+      if (res.requiresApproval) {
+        const approved = window.confirm(`Allow this command to run with your account permissions?\n\n${cmd}\n\nWorking directory: ${defaultCwd}`);
+        res = await executeTerminalCommand(cmd, defaultCwd, 20000, res.approvalId, approved);
+      }
       setHistoryLog((prev) =>
         prev.map((entry) =>
           entry.id === logEntry.id
@@ -255,7 +259,7 @@ export default function TerminalConsole({
           >
             {historyLog.length === 0 ? (
               <div style={{ color: "#475569", fontStyle: "italic", padding: "12px 0" }}>
-                Type a command below or click a preset to execute in the workspace sandbox.
+                Commands run with your account permissions. Only allowlisted read-only commands run without your approval.
               </div>
             ) : (
               historyLog.map((item) => (

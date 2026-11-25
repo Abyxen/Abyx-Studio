@@ -1,5 +1,17 @@
-const fs = require("fs");
-const path = require("path");
+const MAX_STUDY_UPLOAD_BYTES = 20 * 1024 * 1024;
+const path = require('node:path');
+const { dataDir } = require('../../data_paths');
+const { createExtensionService } = require('../../extensions/extension_service');
+const extensionServices = new Map();
+
+function extensionServiceFor(profileId = 'prof_default') {
+  const safeProfile = String(profileId).replace(/[^a-zA-Z0-9_-]/g, '_');
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(safeProfile)) throw new Error('Invalid profile id');
+  if (!extensionServices.has(safeProfile)) {
+    extensionServices.set(safeProfile, createExtensionService(path.join(dataDir, 'profiles', safeProfile)));
+  }
+  return extensionServices.get(safeProfile);
+}
 
 /**
  * Phase 4 API Route Handler for Abyx
@@ -8,6 +20,86 @@ const path = require("path");
 async function handlePhase4Routes(req, res, { studyService, automationService, obsidianVault, subagents, mcpClient, readJsonBody, json }) {
   const parsedUrl = new URL(req.url, "http://localhost");
   const pathname = parsedUrl.pathname;
+
+  if (req.method === "GET" && pathname === "/api/extensions") {
+    try {
+      const service = extensionServiceFor();
+      return json(res, 200, { ok: true, extensions: service.list() });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/extensions/inspect") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      if (typeof body.source !== 'string' || body.source.length > 2048) return json(res, 400, { ok: false, error: 'A package path or supported repository source is required' });
+      const preview = await extensionServiceFor().inspect(body.source);
+      return json(res, 200, preview);
+    } catch (err) {
+      return json(res, 400, { ok: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/extensions/install") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      if (typeof body.source !== 'string' || body.installationApproved !== true || !Array.isArray(body.grantedPermissions) || typeof body.expectedContentHash !== 'string') {
+        return json(res, 400, { ok: false, error: 'Source, inspected content hash, explicit installation approval and reviewed permissions are required' });
+      }
+      const result = await extensionServiceFor().install(body.source, {
+        installationApproved: true,
+        expectedContentHash: body.expectedContentHash,
+        grantedPermissions: body.grantedPermissions,
+        enabled: body.enabled !== false
+      });
+      return json(res, 201, { ok: true, ...result });
+    } catch (err) {
+      return json(res, 400, { ok: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/extensions/update") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      if (typeof body.id !== 'string' || typeof body.source !== 'string' || body.installationApproved !== true || !Array.isArray(body.grantedPermissions) || typeof body.expectedContentHash !== 'string') {
+        return json(res, 400, { ok: false, error: 'ID, source, inspected hash, explicit update approval and reviewed permissions are required' });
+      }
+      const result = await extensionServiceFor().update(body.id, body.source, {
+        installationApproved: true,
+        expectedContentHash: body.expectedContentHash,
+        grantedPermissions: body.grantedPermissions
+      });
+      return json(res, 200, result);
+    } catch (err) {
+      return json(res, 400, { ok: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/extensions/toggle") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      if (typeof body.id !== 'string' || typeof body.enabled !== 'boolean') return json(res, 400, { ok: false, error: 'id and enabled are required' });
+      return json(res, 200, extensionServiceFor().toggle(body.id, body.enabled));
+    } catch (err) {
+      return json(res, 400, { ok: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/extensions/uninstall") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      if (typeof body.id !== 'string') return json(res, 400, { ok: false, error: 'id is required' });
+      return json(res, 200, extensionServiceFor().uninstall(body.id));
+    } catch (err) {
+      return json(res, 400, { ok: false, error: err.message });
+    }
+  }
 
   // ==========================================
   // 1. ABYX LM / STUDYBOOKS (NOTEBOOKLM)
@@ -111,9 +203,21 @@ async function handlePhase4Routes(req, res, { studyService, automationService, o
 
     if (contentType.includes("multipart/form-data")) {
       const chunks = [];
-      req.on("data", chunk => chunks.push(chunk));
+      let bodyBytes = 0;
+      let tooLarge = false;
+      req.setTimeout(30000, () => req.destroy());
+      req.on("data", chunk => {
+        bodyBytes += chunk.length;
+        if (bodyBytes > MAX_STUDY_UPLOAD_BYTES) {
+          tooLarge = true;
+          chunks.length = 0;
+          return;
+        }
+        if (!tooLarge) chunks.push(chunk);
+      });
       req.on("end", async () => {
         try {
+          if (tooLarge) return json(res, 413, { ok: false, error: "Study upload exceeds the 20 MB limit" });
           const buffer = Buffer.concat(chunks);
           const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
           const boundary = boundaryMatch ? (boundaryMatch[1] || boundaryMatch[2]) : null;
@@ -137,10 +241,7 @@ async function handlePhase4Routes(req, res, { studyService, automationService, o
 
             const fnMatch = headerStr.match(/filename="([^"]+)"/i);
             if (fnMatch && fnMatch[1] && fileData.length > 0) {
-              const safeName = path.basename(fnMatch[1]);
-              const profileDir = studyService._getProfileSourcesDir("prof_default");
-              const savePath = path.join(profileDir, safeName);
-              fs.writeFileSync(savePath, fileData);
+              const savePath = studyService.saveUploadedFile(fnMatch[1], fileData, "prof_default");
               uploadedSource = await studyService.addSourceFile(id, savePath, "prof_default");
             }
             offset = nextBoundary;
@@ -554,7 +655,8 @@ async function handlePhase4Routes(req, res, { studyService, automationService, o
       return json(res, 200, {
         ok: true,
         servers: cfg.mcpServers || {},
-        tools: mcpClient.getAllTools("prof_default")
+        tools: mcpClient.getAllTools("prof_default"),
+        status: mcpClient.getServerStatuses("prof_default")
       });
     } catch (err) {
       return json(res, 500, { ok: false, error: err.message });
@@ -573,13 +675,18 @@ async function handlePhase4Routes(req, res, { studyService, automationService, o
       const serverDef = {
         description: body.description || `Custom MCP Server (${name})`,
         enabled: true,
-        command: body.command || "npx",
-        args: Array.isArray(body.args) ? body.args : (body.args ? String(body.args).split(" ") : []),
-        env: body.env || {},
-        tools: Array.isArray(body.tools) ? body.tools : []
+        transport: "stdio",
+        command: body.command,
+        args: Array.isArray(body.args) ? body.args : [],
+        grantedPermissions: Array.isArray(body.grantedPermissions) ? body.grantedPermissions : [],
+        toolPermissions: body.toolPermissions && typeof body.toolPermissions === "object" && !Array.isArray(body.toolPermissions) ? body.toolPermissions : {},
+        envSecretRefs: body.envSecretRefs && typeof body.envSecretRefs === "object" && !Array.isArray(body.envSecretRefs) ? body.envSecretRefs : {},
+        timeoutMs: Math.min(Math.max(Number(body.timeoutMs) || 30000, 1000), 120000),
+        maxOutputBytes: Math.min(Math.max(Number(body.maxOutputBytes) || 65536, 1024), 1024 * 1024)
       };
 
       if (body.path) serverDef.path = body.path;
+      if (body.env) return json(res, 400, { ok: false, error: "Plaintext environment variables are not stored; use provider credential references." });
 
       const result = mcpClient.addServer(name, serverDef, "prof_default");
       return json(res, 200, {
@@ -588,6 +695,34 @@ async function handlePhase4Routes(req, res, { studyService, automationService, o
         servers: mcpClient.loadConfig("prof_default").mcpServers,
         tools: mcpClient.getAllTools("prof_default")
       });
+    } catch (err) {
+      return json(res, 400, { ok: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/mcp/servers/connect") {
+    if (!mcpClient) return json(res, 503, { ok: false, error: "MCP client unavailable" });
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      if (typeof body.name !== "string" || body.executionApproved !== true) {
+        return json(res, 400, { ok: false, error: "Server name and explicit execution approval are required" });
+      }
+      const result = await mcpClient.connectServer(body.name, "prof_default", { executionApproved: true });
+      return json(res, 200, { ok: true, ...result, status: mcpClient.getServerStatuses("prof_default") });
+    } catch (err) {
+      return json(res, 400, { ok: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/mcp/servers/disconnect") {
+    if (!mcpClient) return json(res, 503, { ok: false, error: "MCP client unavailable" });
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      if (typeof body.name !== "string") return json(res, 400, { ok: false, error: "Server name is required" });
+      const result = await mcpClient.disconnectServer(body.name, "prof_default");
+      return json(res, 200, { ok: true, ...result });
     } catch (err) {
       return json(res, 400, { ok: false, error: err.message });
     }

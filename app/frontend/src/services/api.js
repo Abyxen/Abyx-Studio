@@ -480,6 +480,7 @@ export async function streamChatWithLlm(messages, options = {}, onToken = () => 
       messages,
       conversationId: options.conversationId,
       model: options.model || "auto",
+      agentMode: options.agentMode || "act",
       temperature: options.temperature,
       max_tokens: options.maxTokens,
       stream: true,
@@ -1871,6 +1872,66 @@ export async function deleteMcpServer(name) {
   return await readJsonResponse(res, "Failed to delete MCP server.");
 }
 
+export async function connectMcpServer(name, executionApproved) {
+  const res = await fetch("/api/mcp/servers/connect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, executionApproved }),
+  });
+  return await readJsonResponse(res, "Failed to connect MCP server.");
+}
+
+export async function disconnectMcpServer(name) {
+  const res = await fetch("/api/mcp/servers/disconnect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  return await readJsonResponse(res, "Failed to disconnect MCP server.");
+}
+
+export async function getExtensions() {
+  const res = await fetch("/api/extensions");
+  return await readJsonResponse(res, "Failed to fetch extensions.");
+}
+
+export async function inspectExtension(source) {
+  const res = await fetch("/api/extensions/inspect", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source }),
+  });
+  return await readJsonResponse(res, "Failed to inspect extension package.");
+}
+
+export async function installExtension(source, grantedPermissions, expectedContentHash, installationApproved = false) {
+  const res = await fetch("/api/extensions/install", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source, grantedPermissions, expectedContentHash, installationApproved }),
+  });
+  return await readJsonResponse(res, "Failed to install extension.");
+}
+
+export async function updateExtension(id, source, grantedPermissions, expectedContentHash, installationApproved = false) {
+  const res = await fetch("/api/extensions/update", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, source, grantedPermissions, expectedContentHash, installationApproved }),
+  });
+  return await readJsonResponse(res, "Failed to update extension package.");
+}
+
+export async function setExtensionEnabled(id, enabled) {
+  const res = await fetch("/api/extensions/toggle", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, enabled }),
+  });
+  return await readJsonResponse(res, "Failed to update extension.");
+}
+
+export async function uninstallExtension(id) {
+  const res = await fetch("/api/extensions/uninstall", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }),
+  });
+  return await readJsonResponse(res, "Failed to uninstall extension.");
+}
+
 // ── Master Harness & Agentic Subsystem API ─────────────────────────────────
 
 export async function getAgentPolicy() {
@@ -1920,11 +1981,11 @@ export async function startAgentRun(params) {
   return await readJsonResponse(res, "Failed to execute agent run.");
 }
 
-export async function executeTerminalCommand(command, cwd = ".", timeoutMs = 15000) {
+export async function executeTerminalCommand(command, cwd = ".", timeoutMs = 15000, approvalId = null, approved = false) {
   const res = await fetch("/api/terminal/execute", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ command, cwd, timeoutMs }),
+    body: JSON.stringify({ command, cwd, timeoutMs, approvalId, approved }),
   });
   return await readJsonResponse(res, "Terminal execution failed.");
 }
@@ -1938,6 +1999,76 @@ export async function getFileDiff(filePath, newContent, originalContent = "") {
   return await readJsonResponse(res, "Failed to compute diff.");
 }
 
+export async function getContextTelemetry(messages, model, maxContext) {
+  const res = await fetch("/api/context/telemetry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, model, maxContext }),
+  });
+  return await readJsonResponse(res, "Failed to fetch context telemetry.");
+}
+
+export async function compactConversationContext(messages, targetTokens = 4096) {
+  const res = await fetch("/api/context/compact", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, targetTokens }),
+  });
+  return await readJsonResponse(res, "Failed to compact context.");
+}
+
+export async function streamAgentRun({ task, model, max_steps = 8, sessionId, onEvent = () => {}, signal = null }) {
+  const res = await fetch("/api/agent/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task, model, max_steps, sessionId }),
+    signal
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Agent stream request failed (${res.status}): ${errorText}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n\n");
+    buffer = lines.pop() || "";
+
+    for (const block of lines) {
+      if (!block.trim()) continue;
+      let eventType = "message";
+      let eventData = null;
+
+      const subLines = block.split("\n");
+      for (const line of subLines) {
+        if (line.startsWith("event:")) {
+          eventType = line.replace("event:", "").trim();
+        } else if (line.startsWith("data:")) {
+          try {
+            eventData = JSON.parse(line.replace("data:", "").trim());
+          } catch (_) {
+            eventData = line.replace("data:", "").trim();
+          }
+        }
+      }
+
+      if (eventData !== null) {
+        onEvent(eventType, eventData);
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
 // ── Workspace & Universal File Operations API ──────────────────────────────
 
 export async function listHarnessWorkspaceFiles() {
@@ -1945,11 +2076,11 @@ export async function listHarnessWorkspaceFiles() {
   return await readJsonResponse(res, "Failed to fetch workspace files.");
 }
 
-export async function saveWorkspaceFile(filename, content, subfolder = "") {
+export async function saveWorkspaceFile(filename, content, subfolder = "", conversationId = null, prompt = "") {
   const res = await fetch("/api/files/save", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename, content, subfolder }),
+    body: JSON.stringify({ filename, content, subfolder, conversationId, prompt }),
   });
   return await readJsonResponse(res, "Failed to save file.");
 }
@@ -2053,6 +2184,34 @@ export async function getSkillsCatalog() {
   return await readJsonResponse(res, "Failed to fetch skills catalog.");
 }
 
+export async function getAgentTools() {
+  const res = await fetch("/api/agent/tools");
+  return await readJsonResponse(res, "Failed to fetch registered tools.");
+}
+
+export async function setAgentToolEnabled(id, enabled) {
+  const res = await fetch("/api/agent/tools/toggle", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, enabled }),
+  });
+  return await readJsonResponse(res, "Failed to update tool availability.");
+}
+
+export async function getAgentToolBundles() {
+  const res = await fetch("/api/agent/tool-bundles");
+  return await readJsonResponse(res, "Failed to fetch tool bundles.");
+}
+
+export async function setAgentToolBundleEnabled(id, enabled) {
+  const res = await fetch("/api/agent/tool-bundles/toggle", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, enabled }),
+  });
+  return await readJsonResponse(res, "Failed to update tool bundle.");
+}
+
 export async function getResearchCapabilities() {
   const res = await fetch("/api/skills/research");
   return await readJsonResponse(res, "Failed to fetch research capabilities.");
@@ -2096,6 +2255,111 @@ export async function generateVideo(options = {}) {
     body: JSON.stringify(options),
   });
   return await readJsonResponse(res, "Failed to generate video.");
+}
+
+// ── Harness Runtime & Model Control API ──────────────────────────────────────
+
+export async function getHarnessRuntimeConfig() {
+  const res = await fetch("/api/harness/runtime-config");
+  return await readJsonResponse(res, "Failed to fetch harness runtime config.");
+}
+
+export async function updateHarnessRuntimeConfig(updates = {}) {
+  const res = await fetch("/api/harness/runtime-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  return await readJsonResponse(res, "Failed to update harness runtime config.");
+}
+
+// ── Multi-Agent Swarm & Orchestrator API ─────────────────────────────────────
+
+export async function getSpecializedAgents() {
+  const res = await fetch("/api/orchestrator/agents");
+  return await readJsonResponse(res, "Failed to fetch specialized agents.");
+}
+
+export async function registerCustomAgent(agentData) {
+  const res = await fetch("/api/orchestrator/custom-agent", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(agentData),
+  });
+  return await readJsonResponse(res, "Failed to register custom agent.");
+}
+
+export async function cancelOrchestration(runId, reason) {
+  const res = await fetch("/api/orchestrator/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ runId, reason }),
+  });
+  return await readJsonResponse(res, "Failed to cancel orchestration.");
+}
+
+export async function getActiveOrchestrations() {
+  const res = await fetch("/api/orchestrator/active");
+  return await readJsonResponse(res, "Failed to fetch active orchestrations.");
+}
+
+export async function streamOrchestration({ goal, model, concurrency, tasks, onEvent, signal }) {
+  const res = await fetch("/api/orchestrator/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ goal, model, concurrency, tasks }),
+    signal
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    let msg = `HTTP ${res.status}: Failed to start multi-agent orchestration`;
+    try {
+      const parsed = JSON.parse(errorText);
+      if (parsed.error) msg = parsed.error;
+    } catch (_) {}
+    throw new Error(msg);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const rawChunk = buffer.substring(0, boundary);
+      buffer = buffer.substring(boundary + 2);
+
+      let eventType = "message";
+      let dataText = "";
+
+      for (const line of rawChunk.split("\n")) {
+        if (line.startsWith("event:")) {
+          eventType = line.replace("event:", "").trim();
+        } else if (line.startsWith("data:")) {
+          dataText = line.replace("data:", "").trim();
+        }
+      }
+
+      if (dataText) {
+        try {
+          const parsedData = JSON.parse(dataText);
+          if (typeof onEvent === "function") {
+            onEvent(eventType, parsedData);
+          }
+        } catch (_) {}
+      }
+
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+
+  return { ok: true };
 }
 
 

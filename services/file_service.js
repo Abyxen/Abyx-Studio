@@ -1,7 +1,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
+const crypto = require('node:crypto');
 const { workspaceDir: WORKSPACE_DIR } = require('../data_paths');
+const PathGuard = require('../agent/path_guard');
 
 const OLLAMA_BASE = 'http://127.0.0.1:11434';
 const VISION_MODEL = 'moondream';
@@ -406,29 +408,51 @@ async function processUploadedFile(fileObj, userPrompt = '') {
  * 5. File Modification & Workspace Storage
  */
 function saveWorkspaceFile(filename, content, subfolder = '', workspaceRoot = WORKSPACE_DIR) {
-  const safeRoot = path.resolve(workspaceRoot);
+  const resolvedRoot = path.resolve(workspaceRoot);
+  const safeRoot = fs.realpathSync.native(resolvedRoot);
+  const guard = new PathGuard(safeRoot);
   let targetDir = safeRoot;
   if (subfolder) {
     targetDir = path.join(safeRoot, subfolder.replace(/[^\w-]/g, '_'));
   }
+  const safeName = path.basename(filename);
+  const requestedPath = path.join(targetDir, safeName);
+  const targetPath = guard.resolveSafePath(requestedPath, { allowCreate: true });
   if (!fs.existsSync(targetDir)) {
+    guard.resolveSafePath(requestedPath, { allowCreate: true });
     fs.mkdirSync(targetDir, { recursive: true });
+    guard.resolveSafePath(requestedPath, { allowCreate: true });
   }
 
-  const safeName = path.basename(filename);
-  const targetPath = path.join(targetDir, safeName);
-
+  let output;
   if (Buffer.isBuffer(content)) {
-    fs.writeFileSync(targetPath, content);
+    output = content;
   } else if (typeof content === 'string' && content.startsWith('data:')) {
     const base64Index = content.indexOf(';base64,');
     if (base64Index !== -1) {
-      fs.writeFileSync(targetPath, Buffer.from(content.slice(base64Index + 8), 'base64'));
+      output = Buffer.from(content.slice(base64Index + 8), 'base64');
     } else {
-      fs.writeFileSync(targetPath, content, 'utf8');
+      output = Buffer.from(content, 'utf8');
     }
   } else {
-    fs.writeFileSync(targetPath, content, 'utf8');
+    output = Buffer.from(content, 'utf8');
+  }
+
+  const tempPath = path.join(targetDir, `.abyx-${crypto.randomUUID()}.tmp`);
+  let fd;
+  try {
+    if (guard.resolveSafePath(requestedPath, { allowCreate: true }) !== targetPath) throw new Error('File target changed during validation');
+    fd = fs.openSync(tempPath, 'wx', 0o600);
+    fs.writeFileSync(fd, output);
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = null;
+    if (guard.resolveSafePath(requestedPath, { allowCreate: true }) !== targetPath) throw new Error('File target failed final validation');
+    fs.renameSync(tempPath, targetPath);
+  } catch (error) {
+    if (fd !== null && fd !== undefined) fs.closeSync(fd);
+    try { fs.unlinkSync(tempPath); } catch (_) {}
+    throw error;
   }
 
   return {

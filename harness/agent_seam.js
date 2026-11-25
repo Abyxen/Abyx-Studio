@@ -105,6 +105,8 @@ class HarnessAgentLoop extends EventEmitter {
     signal = null,
     onEvent = () => {}
   }) {
+    throw new Error('Legacy harness execution is disabled; use the policy-enforced AgentExecutionEngine route.');
+
     const emit = (event) => {
       onEvent(event);
       HarnessSessionStore.appendEvent(sessionId, event);

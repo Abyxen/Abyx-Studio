@@ -98,7 +98,7 @@ class ControlledBrowserTool {
       const res = await fetchPublicResponse(validUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ABYX/1.0 WebInspector'
-        }, timeoutMs: this.options.defaultTimeoutMs, maxBytes: this.options.maxPageBytes
+        }, timeoutMs: this.options.defaultTimeoutMs, maxBytes: this.options.maxPageBytes, signal: reqSignal
       });
 
       if (!res.ok) {

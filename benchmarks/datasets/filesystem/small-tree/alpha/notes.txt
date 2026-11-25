@@ -1,0 +1,2 @@
+Synthetic fixture file.
+The expected checksum is recorded in benchmarks/config/expected-fixtures.json.

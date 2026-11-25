@@ -430,8 +430,15 @@ class KnowledgeService {
     // Get source names
     const sources = this.listSources(profileId);
     const sourceNameMap = new Map();
+    const sourceById = new Map();
+    const staleSourceIds = new Set();
     for (const s of sources) {
       sourceNameMap.set(s.id, s.name);
+      sourceById.set(s.id, s);
+      try {
+        const currentHash = crypto.createHash('sha256').update(fs.readFileSync(s.filePath)).digest('hex');
+        if (currentHash !== s.fileHash) staleSourceIds.add(s.id);
+      } catch { staleSourceIds.add(s.id); }
     }
 
     const sourceIdFilter = Array.isArray(options.sourceIds)
@@ -448,6 +455,10 @@ class KnowledgeService {
       const chunk = chunkMap.get(chunkId);
       if (!chunk) continue;
       if (sourceIdFilter && !sourceIdFilter.has(chunk.source_id)) continue;
+      if (staleSourceIds.has(chunk.source_id)) continue;
+      const source = sourceById.get(chunk.source_id);
+      if (options.category && source?.metadata?.category !== options.category) continue;
+      if (Array.isArray(options.tags) && options.tags.length && !options.tags.every(tag => source?.metadata?.tags?.includes(tag))) continue;
 
       const bm25Norm = bm25Scores[chunkId] || 0;
       const vecSim = vectorScores[chunkId] || 0;
@@ -495,6 +506,7 @@ class KnowledgeService {
       query: queryText,
       count: topResults.length,
       totalCandidates: candidateIds.size,
+      staleSourceIds: [...staleSourceIds],
       results: topResults
     };
   }
@@ -518,14 +530,15 @@ class KnowledgeService {
 
     const excerpts = results.map((res, idx) => {
       const sourceNum = idx + 1;
-      const pageInfo = res.pageNumber ? ` page="${res.pageNumber}"` : '';
-      const sectionInfo = res.sectionTitle ? ` section="${res.sectionTitle.replace(/"/g, "'")}"` : '';
-      const citationTitle = `[Source ${sourceNum}: ${res.sourceName}${res.sectionTitle ? `, Section: "${res.sectionTitle}"` : ''}${res.pageNumber ? `, Page ${res.pageNumber}` : ''}] (Relevance Score: ${res.score})`;
+      const escapeAttribute = value => String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/[<>]/g, '');
+      const pageInfo = res.pageNumber ? ` page="${escapeAttribute(res.pageNumber)}"` : '';
+      const sectionInfo = res.sectionTitle ? ` section="${escapeAttribute(res.sectionTitle)}"` : '';
+      const citationTitle = `[Source ${sourceNum}: ${escapeAttribute(res.sourceName)}${res.sectionTitle ? `, Section: "${escapeAttribute(res.sectionTitle)}"` : ''}${res.pageNumber ? `, Page ${escapeAttribute(res.pageNumber)}` : ''}] (Relevance Score: ${res.score})`;
 
       // Sanitize potential fence closing escapes in untrusted document text
-      const sanitizedContent = (res.content || '').replace(/<\/document_context>/gi, '<\\/document_context>');
+      const sanitizedContent = String(res.content || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-      return `${citationTitle}\n<document_context id="${sourceNum}" source="${res.sourceName}"${sectionInfo}${pageInfo}>\n${sanitizedContent}\n</document_context>`;
+      return `${citationTitle}\n<document_context id="${sourceNum}" source="${escapeAttribute(res.sourceName)}"${sectionInfo}${pageInfo}>\n${sanitizedContent}\n</document_context>`;
     });
 
     return `${header}\n${excerpts.join('\n---\n\n')}`;

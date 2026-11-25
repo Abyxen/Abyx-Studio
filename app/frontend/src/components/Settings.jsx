@@ -248,7 +248,8 @@ function Settings({
   const EDITABLE_TEXT_KEYS = [
     "systemPrompt", "contextSize", "temperature", "responseTokenMode", 
     "maxTokens", "seed", "performanceProfile", "threads", 
-    "gpuLayers", "batchSize", "cacheTypeK", "cacheTypeV", "preferredBackend"
+    "gpuLayers", "batchSize", "cacheTypeK", "cacheTypeV", "preferredBackend",
+    "ropeScaling", "ropeFreqScale", "ropeFreqBase", "yarnOrigCtx"
   ];
 
   const hasPendingChanges = textSettings && pendingTextSettings && EDITABLE_TEXT_KEYS.some(key => {
@@ -916,6 +917,30 @@ function Settings({
               onChange={(e) => updateTextSetting("contextSize", parseInt(e.target.value))}
             />
           </SettingRow>
+          <SettingRow title="RoPE context scaling" description="Scales context window for models like Qwen 2.5 and Llama 3 (e.g. 32k on 8GB VRAM)">
+            <Choice
+              label="RoPE scaling mode"
+              value={pendingTextSettings.ropeScaling || "none"}
+              options={[
+                { id: "none", label: "None" },
+                { id: "yarn", label: "YaRN" },
+                { id: "linear", label: "Linear" },
+              ]}
+              onChange={(val) => updateTextSetting("ropeScaling", val)}
+            />
+          </SettingRow>
+          {pendingTextSettings.ropeScaling && pendingTextSettings.ropeScaling !== "none" && (
+            <SettingRow title="RoPE scale factor" description="Frequency scaling multiplier (0.25 = 4x context, 0.5 = 2x context)">
+              <Slider
+                label="RoPE scale factor"
+                value={pendingTextSettings.ropeFreqScale ?? 1.0}
+                min={0.1}
+                max={1.0}
+                step={0.05}
+                onChange={(e) => updateTextSetting("ropeFreqScale", parseFloat(e.target.value))}
+              />
+            </SettingRow>
+          )}
         </ul>
 
         <div className="page-section-label settings-group-label">Generation</div>

@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   LoaderCircle, Trash2, Square, X, ChevronDown, ChevronRight, Globe2, Globe, Plus, PenLine,
   Lightbulb, Zap, FileText, ArrowUp, Brain, Mic, AudioLines, Image as ImageIcon,
   PanelLeft, Volume2, RotateCcw, ThumbsUp, ThumbsDown, Copy, Check, Pin,
   Download, Sparkles, RefreshCw, FolderKanban, FileCode, Eye, ExternalLink,
   Folder, Code2, Terminal, CheckCircle, Circle, Play, Pause, Settings, GitBranch, Layers, Clock,
-  UploadCloud, FileArchive, FileUp, File
+  UploadCloud, FileArchive, FileUp, File, ShieldAlert, Sliders
 } from "lucide-react";
 import {
   getBackendStatus,
@@ -20,7 +20,12 @@ import {
   autoTitleConversation,
   saveWorkspaceFile,
   revealWorkspaceFile,
+  getPendingApprovals,
+  resolveAgentApproval,
+  getFileDiff,
 } from "../services/api";
+import DiffViewer from "./DiffViewer";
+import HarnessControlsDrawer from "./HarnessControlsDrawer";
 import katex from "katex";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "katex/dist/katex.min.css";
@@ -594,6 +599,29 @@ function TextChat({
     completion_tokens: 0,
     total_tokens: 0
   });
+
+  const [agentMode, setAgentMode] = useState(() => localStorage.getItem("abyx_agent_mode") || "act");
+  const [isHarnessControlsOpen, setIsHarnessControlsOpen] = useState(false);
+  const [activeDiff, setActiveDiff] = useState(null);
+  const [pendingApprovals, setPendingApprovals] = useState([]);
+
+  useEffect(() => {
+    let mounted = true;
+    const checkApprovals = async () => {
+      try {
+        const res = await getPendingApprovals();
+        if (mounted && res && Array.isArray(res.approvals)) {
+          setPendingApprovals(res.approvals.filter(a => a.status === "pending"));
+        }
+      } catch (_) {}
+    };
+    checkApprovals();
+    const interval = setInterval(checkApprovals, 3000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     if (setIsLlmLoaded) {
@@ -1482,6 +1510,7 @@ function TextChat({
       const response = await streamChatWithLlm(requestMessages, {
         conversationId: activeConversationId,
         model: selectedModel || "auto",
+        agentMode: agentMode || "act",
         temperature: textSettings?.temperature || 0.7,
         maxTokens: effectiveMaxTokens,
         topP: textSettings?.topP,
@@ -1860,6 +1889,7 @@ function TextChat({
       const response = await streamChatWithLlm(requestMessages, {
         conversationId: activeConversationId,
         model: selectedModel || "auto",
+        agentMode: agentMode || "act",
         temperature: textSettings?.temperature || 0.7,
         maxTokens: textSettings?.maxTokens || 8192,
         signal: controller.signal,
@@ -1952,8 +1982,22 @@ function TextChat({
     : `Cloud: ${selectedModel.split("/").pop()}`;
   const dotColor = isExplicitLocal ? "#4ade80" : "#38bdf8";
 
-  const contextMax = status.settings?.contextSize || textSettings?.contextSize || 262144;
-  const contextUsed = tokenUsage.total_tokens || 0;
+  const currentModelName = String(selectedModel || status.settings?.model || "").toLowerCase();
+  const modelContextLimit = currentModelName.includes("inkling") ? 8192 :
+                            currentModelName.includes("gemma") ? 16384 :
+                            currentModelName.includes("abyx") ? 32768 : 8192;
+  const contextMax = Number(status.settings?.contextSize || textSettings?.contextSize) || modelContextLimit;
+
+  const estimatedTokens = useMemo(() => {
+    let t = 0;
+    for (const m of messages) {
+      const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content || "");
+      t += Math.max(1, Math.round(text.length / 3.8));
+    }
+    return t;
+  }, [messages]);
+
+  const contextUsed = tokenUsage.total_tokens > 0 ? tokenUsage.total_tokens : estimatedTokens;
   const contextPercent = Math.min(100, Math.round((contextUsed / contextMax) * 100));
   const composerPlaceholder = isChatAvailable ? "Ask anything" : "Select a model to start chatting";
 
@@ -2722,6 +2766,56 @@ function TextChat({
                   )}
                 </div>
 
+                {/* Plan / Act Mode Pill */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextMode = agentMode === "act" ? "plan" : "act";
+                    setAgentMode(nextMode);
+                    localStorage.setItem("abyx_agent_mode", nextMode);
+                  }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "3px 10px",
+                    borderRadius: "12px",
+                    background: agentMode === "act" ? "rgba(56, 189, 248, 0.12)" : "rgba(168, 85, 247, 0.12)",
+                    border: `1px solid ${agentMode === "act" ? "rgba(56, 189, 248, 0.3)" : "rgba(168, 85, 247, 0.3)"}`,
+                    color: agentMode === "act" ? "#38bdf8" : "#c084fc",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    cursor: "pointer"
+                  }}
+                  title={agentMode === "act" ? "Act Mode: Autonomous tool execution enabled" : "Plan Mode: Architectural reasoning only"}
+                >
+                  {agentMode === "act" ? <Zap size={12} /> : <Brain size={12} />}
+                  <span>{agentMode === "act" ? "Act Mode" : "Plan Mode"}</span>
+                </button>
+
+                {/* Model & Harness Parameters Quick Drawer */}
+                <button
+                  type="button"
+                  onClick={() => setIsHarnessControlsOpen(true)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "3px 10px",
+                    borderRadius: "12px",
+                    background: "rgba(255, 255, 255, 0.05)",
+                    border: "1px solid rgba(255, 255, 255, 0.12)",
+                    color: "rgba(255, 255, 255, 0.85)",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    cursor: "pointer"
+                  }}
+                  title="Configure context window, temperature, RoPE scaling, and agent loop depth"
+                >
+                  <Sliders size={12} />
+                  <span>Controls</span>
+                </button>
+
                 {(() => {
                   const strokeColor = contextPercent > 85 ? "#ef4444" : contextPercent > 70 ? "#f59e0b" : "var(--md-sys-color-primary, #38bdf8)";
                   return (
@@ -3002,11 +3096,227 @@ function TextChat({
                     </div>
                   );
                 })}
+
+                {/* In-Stream Agent Approvals */}
+                {pendingApprovals && pendingApprovals.length > 0 && (
+                  <div className="agent-approvals-stream" style={{ margin: "16px 0", display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {pendingApprovals.map((approval) => (
+                      <div
+                        key={approval.id}
+                        className="agent-approval-card"
+                        style={{
+                          background: "linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(20, 20, 25, 0.95) 100%)",
+                          border: "1px solid rgba(239, 68, 68, 0.35)",
+                          borderRadius: "12px",
+                          padding: "16px",
+                          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.4)"
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <ShieldAlert size={18} color="#ef4444" />
+                            <span style={{ fontSize: "13px", fontWeight: 700, color: "#f87171", letterSpacing: "0.5px" }}>
+                              AGENT ACTION REQUIRES PERMISSION
+                            </span>
+                          </div>
+                          <span style={{
+                            fontSize: "10px",
+                            fontWeight: 700,
+                            padding: "2px 8px",
+                            borderRadius: "6px",
+                            background: "rgba(239, 68, 68, 0.2)",
+                            color: "#ef4444",
+                            textTransform: "uppercase"
+                          }}>
+                            {approval.riskLevel || "HIGH RISK"}
+                          </span>
+                        </div>
+
+                        <div style={{ fontSize: "12px", color: "var(--color-text-secondary, #94a3b8)", marginBottom: "8px" }}>
+                          Tool: <strong style={{ color: "var(--color-text-primary, #f1f5f9)" }}>{approval.tool}</strong>
+                          {approval.action ? " · Action: " : ""}
+                          {approval.action && <strong style={{ color: "var(--color-text-primary, #f1f5f9)" }}>{approval.action}</strong>}
+                        </div>
+
+                        <div style={{
+                          background: "rgba(0, 0, 0, 0.4)",
+                          borderRadius: "8px",
+                          padding: "10px 12px",
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: "11px",
+                          color: "#e2e8f0",
+                          wordBreak: "break-all",
+                          marginBottom: "12px",
+                          border: "1px solid rgba(255, 255, 255, 0.06)"
+                        }}>
+                          {approval.target || approval.command || approval.description || "Potentially destructive workspace modification"}
+                        </div>
+                        {approval.preview && (
+                          <pre style={{
+                            whiteSpace: "pre-wrap",
+                            overflowWrap: "anywhere",
+                            background: "rgba(0, 0, 0, 0.35)",
+                            borderRadius: "8px",
+                            padding: "10px 12px",
+                            color: "#cbd5e1",
+                            fontSize: "11px",
+                            margin: "0 0 10px"
+                          }}>{approval.preview}</pre>
+                        )}
+                        {approval.reason && (
+                          <div style={{ fontSize: "11px", color: "#fbbf24", marginBottom: "12px" }}>
+                            {approval.reason}
+                          </div>
+                        )}
+
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await resolveAgentApproval(approval.id, true);
+                                setPendingApprovals(prev => prev.filter(a => a.id !== approval.id));
+                              } catch (_) {}
+                            }}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              padding: "6px 14px",
+                              borderRadius: "8px",
+                              background: "#10b981",
+                              color: "#ffffff",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              border: "none"
+                            }}
+                          >
+                            <Check size={14} />
+                            Approve Action
+                          </button>
+
+                          {approval.filePath && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  const diffRes = await getFileDiff(approval.filePath, approval.newContent || "");
+                                  if (diffRes && diffRes.diff) {
+                                    setActiveDiff({
+                                      filePath: approval.filePath,
+                                      diffLines: diffRes.diff,
+                                      originalContent: diffRes.originalContent || "",
+                                      newContent: approval.newContent || ""
+                                    });
+                                  }
+                                } catch (_) {}
+                              }}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                padding: "6px 14px",
+                                borderRadius: "8px",
+                                background: "rgba(255, 255, 255, 0.08)",
+                                color: "#e2e8f0",
+                                border: "1px solid rgba(255, 255, 255, 0.12)",
+                                fontSize: "12px",
+                                fontWeight: 500,
+                                cursor: "pointer"
+                              }}
+                            >
+                              <FileCode size={14} />
+                              View Diff
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await resolveAgentApproval(approval.id, false);
+                                setPendingApprovals(prev => prev.filter(a => a.id !== approval.id));
+                              } catch (_) {}
+                            }}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              padding: "6px 14px",
+                              borderRadius: "8px",
+                              background: "rgba(239, 68, 68, 0.15)",
+                              color: "#ef4444",
+                              border: "1px solid rgba(239, 68, 68, 0.3)",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              cursor: "pointer"
+                            }}
+                          >
+                            <X size={14} />
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div ref={bottomRef} />
             </div>
 
             <div className="chat-composer-dock">{composer}</div>
+
+            {/* Active Diff Modal */}
+            {activeDiff && (
+              <div
+                style={{
+                  position: "fixed",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: "rgba(0, 0, 0, 0.7)",
+                  backdropFilter: "blur(6px)",
+                  zIndex: 9999,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "24px"
+                }}
+                onClick={() => setActiveDiff(null)}
+              >
+                <div
+                  style={{
+                    width: "100%",
+                    maxWidth: "960px",
+                    maxHeight: "85vh",
+                    background: "#0f172a",
+                    borderRadius: "16px",
+                    overflow: "hidden",
+                    border: "1px solid rgba(255, 255, 255, 0.15)",
+                    boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.8)",
+                    display: "flex",
+                    flexDirection: "column"
+                  }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <DiffViewer
+                    filePath={activeDiff.filePath}
+                    originalContent={activeDiff.originalContent}
+                    newContent={activeDiff.newContent}
+                    diffLines={activeDiff.diffLines}
+                    onClose={() => setActiveDiff(null)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Harness Controls Drawer */}
+            <HarnessControlsDrawer
+              isOpen={isHarnessControlsOpen}
+              onClose={() => setIsHarnessControlsOpen(false)}
+            />
           </>
         )}
       </section>
@@ -3266,9 +3576,9 @@ export function CodeBlockRenderer({ code, lang, onOpenBrowser, isComplete = true
   // Auto-save to workspace whenever code block is generated and complete
   useEffect(() => {
     if (isComplete && !isImageOrMedia && cleanCode && cleanCode.length > 5 && filename) {
-      saveWorkspaceFile(filename, cleanCode).catch(() => {});
+      saveWorkspaceFile(filename, cleanCode, "", null, userPrompt).catch(() => {});
     }
-  }, [isComplete, isImageOrMedia, filename, cleanCode]);
+  }, [isComplete, isImageOrMedia, filename, cleanCode, userPrompt]);
 
   const handleCopy = useCallback(() => {
     try {

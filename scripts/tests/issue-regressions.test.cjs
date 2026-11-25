@@ -253,8 +253,11 @@ test("image generator exposes the wired negative prompt", () => {
 test("text chat accepts document attachments without requiring a vision model", () => {
   const chat = read("app/frontend/src/components/TextChat.jsx");
   assert.match(chat, /disabled=\{!status\.ready \|\| isBusy\}/);
-  assert.match(chat, /type: "document"/);
-  assert.match(chat, /if \(!supportsVision\)[\s\S]*?Vision Model Required/);
+  const pdfHandler = chat.match(/\/\/ 4\. PDF Documents([\s\S]*?)\/\/ 5\. Code & Text files/);
+  assert.ok(pdfHandler, "PDF attachments have a dedicated handler");
+  assert.match(pdfHandler[1], /extractPdfText\(file\)/);
+  assert.match(pdfHandler[1], /type: "document"/);
+  assert.doesNotMatch(pdfHandler[1], /supportsVision/);
 });
 
 test("issue 90: llama.cpp backend updates on release bumps and mllama fails with a clear message", () => {
@@ -322,7 +325,8 @@ test("issue 86: image backend validation keeps the real failure reason", () => {
 test("launchers update a stale llama.cpp backend so existing installs get backend fixes", () => {
   assert.match(read("mac.sh"), /scripts\/setup\/update-llama\.sh/);
   assert.match(read("linux.sh"), /scripts\/setup\/update-llama\.sh/);
-  assert.match(read("windows.bat"), /scripts\\setup\\update-llama\.ps1/);
+  assert.match(read("Abyx.bat"), /scripts\\setup\\update-llama\.ps1/);
+  assert.match(read("windows.bat"), /Abyx\.bat/);
   const sh = read("scripts/setup/update-llama.sh");
   assert.match(sh, /\.llama-release/);
   assert.match(sh, /setup-llama\.sh/);

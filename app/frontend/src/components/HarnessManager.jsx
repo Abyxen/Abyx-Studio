@@ -1,24 +1,48 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Cpu, RefreshCw, CheckCircle2, ShieldCheck, Box, Layers, Terminal, Globe,
-  HardDrive, Brain, Play, Square, AlertCircle, FileText, FolderPlus, FilePlus,
-  Trash2, Move, Download, ExternalLink, Search, Sparkles, Check, X, Eye, FileCode, Users
+  Cpu, RefreshCw, CheckCircle2, ShieldCheck, Box, Layers, Terminal, Globe, Wrench,
+  HardDrive, Brain, Play, Square, AlertCircle, FileText, FolderPlus, FilePlus, Plug,
+  Trash2, Move, Download, ExternalLink, Search, Sparkles, Check, X, Eye, FileCode, Users, Sliders, Network
 } from "lucide-react";
 import SubagentsHub from "./SubagentsHub";
 import TerminalConsole from "./TerminalConsole";
 import DiffViewer from "./DiffViewer";
+import HarnessControlsDrawer from "./HarnessControlsDrawer";
+import MultiAgentWorkspace from "./MultiAgentWorkspace";
 import {
   getHarnessStatus, getHarnessPlugins, getHarnessSeams,
-  startAgentRun, listAgentRuns, getPendingApprovals, resolveAgentApproval, cancelAgentRun,
+  startAgentRun, streamAgentRun, listAgentRuns, getPendingApprovals, resolveAgentApproval, cancelAgentRun,
   listHarnessWorkspaceFiles, saveWorkspaceFile, createWorkspaceFolder, moveWorkspacePath, deleteWorkspacePath,
   generateWorkspaceFile, openWorkspacePath,
   searchBrowserWeb, browseWebPage, openSystemBrowser,
-  getSkillsCatalog, executeResearchWorkflow
+  getSkillsCatalog, executeResearchWorkflow, getAgentTools, setAgentToolEnabled, getAgentToolBundles, setAgentToolBundleEnabled,
+  getMcpServers, addMcpServer, toggleMcpServer, deleteMcpServer, connectMcpServer, disconnectMcpServer,
+  getExtensions, inspectExtension, installExtension, updateExtension, setExtensionEnabled, uninstallExtension
 } from "../services/api";
 import "../styles/abyx.css";
 
+const RUN_STATUS_LABELS = {
+  pending: "Queued",
+  running: "Working",
+  waiting_approval: "Waiting for your approval",
+  paused: "Paused",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled"
+};
+
+const RUN_STATUS_COLORS = {
+  completed: "var(--md-sys-color-success)",
+  waiting_approval: "#eab308",
+  failed: "var(--md-sys-color-error)",
+  cancelled: "var(--md-sys-color-outline)",
+  running: "var(--md-sys-color-primary)",
+  pending: "var(--md-sys-color-outline)",
+  paused: "var(--md-sys-color-outline)"
+};
+
 export default function HarnessManager({ showAlert, onOpenBrowser, activeProject }) {
-  const [activeTab, setActiveTab] = useState("agent");
+  const [activeTab, setActiveTab] = useState("multiagent");
   const [loading, setLoading] = useState(false);
 
   // 1. Harness Status & Seams
@@ -27,6 +51,7 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
   const [seams, setSeams] = useState([]);
 
   // 2. Agent Tasks
+  const [isControlsOpen, setIsControlsOpen] = useState(false);
   const [taskInput, setTaskInput] = useState("");
   const [taskModel, setTaskModel] = useState("auto");
   const [maxSteps, setMaxSteps] = useState(8);
@@ -34,6 +59,7 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
   const [runHistory, setRunHistory] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [isExecuting, setIsExecuting] = useState(false);
+  const agentAbortRef = useRef(null);
 
   // 3. Workspace Files
   const [workspaceFiles, setWorkspaceFiles] = useState([]);
@@ -58,6 +84,13 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
 
   // 5. Skills & Research
   const [skills, setSkills] = useState([]);
+  const [registeredTools, setRegisteredTools] = useState([]);
+  const [registeredBundles, setRegisteredBundles] = useState([]);
+  const [mcpState, setMcpState] = useState({ servers: {}, tools: [], status: {} });
+  const [mcpName, setMcpName] = useState("");
+  const [mcpCommand, setMcpCommand] = useState("");
+  const [mcpArgs, setMcpArgs] = useState("");
+  const [extensions, setExtensions] = useState([]);
   const [skillFilter, setSkillFilter] = useState("");
   const [researchTopic, setResearchTopic] = useState("");
   const [researchResult, setResearchResult] = useState(null);
@@ -77,6 +110,10 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
       setStatus(statusRes);
       setPlugins(pluginsRes.plugins || []);
       setSeams(seamsRes.seams || []);
+      const mcpRes = await getMcpServers().catch(() => ({ servers: {}, tools: [], status: {} }));
+      setMcpState({ servers: mcpRes.servers || {}, tools: mcpRes.tools || [], status: mcpRes.status || {} });
+      const extensionRes = await getExtensions().catch(() => ({ extensions: [] }));
+      setExtensions(extensionRes.extensions || []);
     } catch (err) {
       console.warn("Base harness telemetry load warning:", err.message);
     }
@@ -116,12 +153,23 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
     }
   }, []);
 
+  const loadTools = useCallback(async () => {
+    try {
+      const [res, bundleRes] = await Promise.all([getAgentTools(), getAgentToolBundles()]);
+      if (res.ok) setRegisteredTools(res.tools || []);
+      if (bundleRes.ok) setRegisteredBundles(bundleRes.bundles || []);
+    } catch (err) {
+      console.warn("Tool registry load error:", err.message);
+    }
+  }, []);
+
   useEffect(() => {
     loadBaseData();
     loadAgentRuns();
     loadFiles();
     loadSkills();
-  }, [loadBaseData, loadAgentRuns, loadFiles, loadSkills]);
+    loadTools();
+  }, [loadBaseData, loadAgentRuns, loadFiles, loadSkills, loadTools]);
 
   // Periodic polling for active run / approvals
   useEffect(() => {
@@ -135,49 +183,142 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
     };
   }, [isExecuting, loadAgentRuns]);
 
-  // Run Agent Task
+  // Run Agent Task with Real-time SSE Streaming
   const handleStartTask = async () => {
     if (!taskInput.trim()) {
       showAlert?.({ title: "Required", message: "Please enter a task description.", danger: true });
       return;
     }
     setIsExecuting(true);
+    const abortCtrl = new AbortController();
+    agentAbortRef.current = abortCtrl;
+
+    const initialRun = {
+      id: `run_${Date.now()}`,
+      goal: taskInput.trim(),
+      model: taskModel,
+      status: "running",
+      startTime: new Date().toISOString(),
+      steps: [],
+      finalOutput: ""
+    };
+    setActiveRun(initialRun);
+
     try {
-      const res = await startAgentRun({
+      await streamAgentRun({
         task: taskInput.trim(),
         model: taskModel,
         max_steps: maxSteps,
-        async: false,
+        sessionId: `studio_${Date.now()}`,
+        signal: abortCtrl.signal,
+        onEvent: (eventType, eventData) => {
+          if (!eventData || typeof eventData !== "object") return;
+          const event = { ...eventData, type: eventType };
+        const runStatusByEvent = {
+          run_started: "running",
+          approval_required: "waiting_approval",
+          approval_granted: "running",
+          run_completed: event.status,
+          run_cancelled: "cancelled",
+          run_error: "failed",
+          error: "failed"
+        };
+        setActiveRun((prev) => {
+          if (!prev) return prev;
+          const timeline = event.type === "token"
+            ? (prev.timeline || [])
+            : [...(prev.timeline || []), event].slice(-150);
+          return {
+            ...prev,
+            timeline,
+            status: runStatusByEvent[event.type] || prev.status,
+            stepsExecuted: event.stepsExecuted ?? prev.stepsExecuted,
+            toolsExecuted: event.toolsExecuted ?? prev.toolsExecuted,
+            finalOutput: event.output || prev.finalOutput,
+            error: event.error || prev.error
+          };
+        });
+          if (event.type === "token" && event.token) {
+            setActiveRun((prev) => prev ? { ...prev, finalOutput: (prev.finalOutput || "") + event.token } : prev);
+          } else if (event.type === "step_started") {
+            setActiveRun((prev) => {
+              if (!prev) return prev;
+              const steps = [...(prev.steps || []), {
+                stepIndex: event.stepIndex || (prev.steps?.length || 0) + 1,
+                thought: event.thought || "",
+                status: "running",
+                toolCalls: []
+              }];
+              return { ...prev, steps };
+            });
+          } else if (event.type === "tool_call") {
+            setActiveRun((prev) => {
+              if (!prev) return prev;
+              const steps = [...(prev.steps || [])];
+              const lastStep = steps[steps.length - 1] || { stepIndex: 1, toolCalls: [] };
+              lastStep.toolCalls = [...(lastStep.toolCalls || []), {
+                name: event.toolName,
+                args: event.args,
+                status: "running"
+              }];
+              if (!steps.length) steps.push(lastStep);
+              return { ...prev, steps };
+            });
+          } else if (event.type === "tool_result") {
+            setActiveRun((prev) => {
+              if (!prev) return prev;
+              const steps = [...(prev.steps || [])];
+              const lastStep = steps[steps.length - 1];
+              if (lastStep && lastStep.toolCalls && lastStep.toolCalls.length > 0) {
+                const lastCall = lastStep.toolCalls[lastStep.toolCalls.length - 1];
+                lastCall.status = "completed";
+                lastCall.result = event.result;
+              }
+              return { ...prev, steps };
+            });
+          } else if (event.type === "run_done") {
+            setActiveRun((prev) => prev ? {
+              ...prev,
+              status: event.status || "completed",
+              stepsExecuted: event.stepsExecuted,
+              toolsExecuted: event.toolsExecuted,
+              finalOutput: event.output || prev.finalOutput,
+              error: event.error || prev.error
+            } : prev);
+            if (event.status === "completed") {
+              showAlert?.({ title: "Task Completed", message: "Agent completed task successfully." });
+            } else if (event.status === "failed") {
+              showAlert?.({ title: "Task Failed", message: event.error || "The agent run failed.", danger: true });
+            }
+          }
+        }
       });
-
-      if (res.ok && res.run) {
-        setActiveRun(res.run);
-        showAlert?.({ title: "Task Completed", message: `Agent completed task in ${res.run.stepsExecuted || 1} step(s).` });
-      } else if (res.ok && res.runId) {
-        showAlert?.({ title: "Task Started", message: `Agent task launched (ID: ${res.runId}).` });
-      } else {
-        showAlert?.({ title: "Task Status", message: res.run?.finalOutput || res.error || "Agent task finished with remarks." });
-        if (res.run) setActiveRun(res.run);
-      }
       loadAgentRuns();
       loadFiles();
     } catch (err) {
-      showAlert?.({ title: "Execution Error", message: err.message, danger: true });
+      if (err.name !== "AbortError") {
+        showAlert?.({ title: "Execution Error", message: err.message, danger: true });
+      }
     } finally {
       setIsExecuting(false);
+      agentAbortRef.current = null;
     }
   };
 
   const handleCancelRun = async () => {
-    if (!activeRun?.id) return;
-    try {
-      await cancelAgentRun(activeRun.id, "Cancelled by user");
-      showAlert?.({ title: "Cancelled", message: "Agent run was cancelled." });
-      loadAgentRuns();
-      setIsExecuting(false);
-    } catch (err) {
-      showAlert?.({ title: "Error", message: err.message, danger: true });
+    if (agentAbortRef.current) {
+      agentAbortRef.current.abort();
+      agentAbortRef.current = null;
     }
+    if (activeRun?.id) {
+      try {
+        await cancelAgentRun(activeRun.id, "Cancelled by user");
+      } catch (_) {}
+    }
+    setActiveRun((prev) => prev ? { ...prev, status: "cancelled" } : null);
+    setIsExecuting(false);
+    showAlert?.({ title: "Cancelled", message: "Agent task was cancelled." });
+    loadAgentRuns();
   };
 
   const handleResolveApproval = async (approvalId, approved) => {
@@ -347,18 +488,39 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
               Unified Abyx microkernel runtime, workspace file tools, bounded agent task loop, web browser, and skills engine.
             </p>
           </div>
-          <button className="abyx-btn" onClick={() => { loadBaseData(); loadAgentRuns(); loadFiles(); loadSkills(); }} disabled={loading}>
-            <RefreshCw size={14} className={loading ? "spin" : ""} /> Refresh All
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              className="abyx-btn"
+              onClick={() => setIsControlsOpen(true)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                background: "rgba(59, 130, 246, 0.12)",
+                border: "1px solid rgba(59, 130, 246, 0.3)",
+                color: "#60a5fa"
+              }}
+              title="Configure context window, temperature, RoPE scaling, and agent loop depth"
+            >
+              <Sliders size={14} /> Model &amp; Harness Controls
+            </button>
+            <button className="abyx-btn" onClick={() => { loadBaseData(); loadAgentRuns(); loadFiles(); loadSkills(); }} disabled={loading}>
+              <RefreshCw size={14} className={loading ? "spin" : ""} /> Refresh All
+            </button>
+          </div>
         </div>
 
         {/* Tab Navigation */}
         <div style={{ display: "flex", gap: 8, marginTop: 18, borderBottom: "1px solid var(--border-color)", paddingBottom: 8, overflowX: "auto" }}>
           {[
+            { id: "multiagent", label: "Multi-Agent Swarm (12)", icon: Network },
             { id: "agent", label: "Agent Tasks & Loop", icon: Play },
             { id: "terminal", label: "Terminal Runner", icon: Terminal },
             { id: "subagents", label: "Subagent Team (7)", icon: Users },
-            { id: "skills", label: "Skills (76)", icon: Sparkles },
+            { id: "skills", label: `Skills (${skills.length})`, icon: Sparkles },
+            { id: "tools", label: "Tools & Capabilities", icon: Wrench },
+            { id: "mcp", label: "MCP Servers", icon: Plug },
+            { id: "extensions", label: "Extensions", icon: Box },
             { id: "files", label: "Workspace & Documents", icon: HardDrive },
             { id: "browser", label: "Browser & Web", icon: Globe },
             { id: "seams", label: "Microkernel Seams", icon: Layers },
@@ -392,37 +554,50 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
       </div>
 
       {/* ======================================================== */}
+      {/* TAB 0: MULTI-AGENT SWARM & ORCHESTRATION (12 AGENTS)     */}
+      {/* ======================================================== */}
+      {activeTab === "multiagent" && (
+        <div style={{ marginTop: 8, height: "calc(100vh - 220px)" }}>
+          <MultiAgentWorkspace activeProject={activeProject} onOpenFile={openWorkspacePath} />
+        </div>
+      )}
+
+      {/* ======================================================== */}
       {/* TAB 1: AGENT TASKS & EXECUTION LOOP                      */}
       {/* ======================================================== */}
       {activeTab === "agent" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           {/* Pending Approvals Alert Banner */}
           {pendingApprovals.length > 0 && (
-            <div style={{ background: "rgba(234, 179, 8, 0.12)", border: "1px solid #eab308", borderRadius: 8, padding: "16px 20px" }}>
+            <section aria-labelledby="harness-approval-heading" style={{ background: "rgba(234, 179, 8, 0.12)", border: "1px solid #eab308", borderRadius: 8, padding: "16px 20px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 600, color: "#eab308", marginBottom: 8 }}>
-                <AlertCircle size={20} /> Human-In-The-Loop Approval Required ({pendingApprovals.length})
+                <AlertCircle size={20} /> <span id="harness-approval-heading">Review requested actions ({pendingApprovals.length})</span>
               </div>
-              <p style={{ fontSize: "0.85rem", color: "var(--md-sys-color-on-surface)", margin: "0 0 12px 0" }}>
-                The agent proposes high-impact actions that require your explicit confirmation to proceed.
+                <p style={{ fontSize: "0.85rem", color: "var(--md-sys-color-on-surface)", margin: "0 0 12px 0" }}>
+                Review each action and its arguments before allowing it to run. Denying an action leaves it unexecuted.
               </p>
               {pendingApprovals.map((appr) => (
-                <div key={appr.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--card-bg)", padding: 12, borderRadius: 6, marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>Tool: {appr.toolName}</div>
+                <div key={appr.id} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap", background: "var(--card-bg)", padding: 12, borderRadius: 6, marginBottom: 8 }}>
+                  <div style={{ flex: "1 1 300px", minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>Requested action: {appr.toolName}</div>
                     <div style={{ fontSize: "0.78rem", color: "var(--md-sys-color-outline)" }}>{appr.reason}</div>
                     {appr.preview && <pre style={{ margin: "4px 0 0 0", fontSize: "0.75rem", background: "rgba(0,0,0,0.3)", padding: 4, borderRadius: 4 }}>{appr.preview}</pre>}
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ cursor: "pointer", fontSize: "0.78rem" }}>Review exact arguments</summary>
+                      <pre style={{ maxHeight: 220, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: "0.75rem" }}>{JSON.stringify(appr.args || {}, null, 2)}</pre>
+                    </details>
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button className="abyx-btn" style={{ background: "var(--md-sys-color-success)", color: "#fff", borderColor: "transparent" }} onClick={() => handleResolveApproval(appr.id, true)}>
-                      <Check size={14} /> Approve
+                    <button className="abyx-btn" style={{ background: "var(--md-sys-color-success)", color: "#fff", borderColor: "transparent" }} onClick={() => handleResolveApproval(appr.id, true)} aria-label={`Approve ${appr.toolName}`}>
+                      <Check size={14} /> Allow once
                     </button>
-                    <button className="abyx-btn" style={{ background: "var(--md-sys-color-error)", color: "#fff", borderColor: "transparent" }} onClick={() => handleResolveApproval(appr.id, false)}>
+                    <button className="abyx-btn" style={{ background: "var(--md-sys-color-error)", color: "#fff", borderColor: "transparent" }} onClick={() => handleResolveApproval(appr.id, false)} aria-label={`Deny ${appr.toolName}`}>
                       <X size={14} /> Deny
                     </button>
                   </div>
                 </div>
               ))}
-            </div>
+            </section>
           )}
 
           {/* New Task Dispatcher Card */}
@@ -431,7 +606,7 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
               <Play size={18} color="var(--md-sys-color-primary)" /> Bounded Agent Task Dispatcher
             </h2>
             <p style={{ fontSize: "0.85rem", color: "var(--md-sys-color-outline)", marginTop: 4, marginBottom: 16 }}>
-              Provide a natural-language goal. The agent plans, calls sandboxed workspace tools (filesystem, document generation, web search), and records every event.
+              Provide a natural-language goal. The agent plans, calls policy-checked workspace tools (filesystem, document generation, web search), and records every event.
             </p>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -482,14 +657,16 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                 <div>
                   <h3 style={{ margin: 0, fontSize: "1.05rem", display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className={`abyx-status-indicator ${activeRun.status === "completed" ? "live" : activeRun.status === "running" ? "warning" : "offline"}`} />
+                    <span className={`abyx-status-indicator ${activeRun.status === "completed" ? "live" : activeRun.status === "running" || activeRun.status === "waiting_approval" ? "warning" : "offline"}`} aria-hidden="true" />
                     Run: {activeRun.goal}
                   </h3>
-                  <div style={{ fontSize: "0.78rem", color: "var(--md-sys-color-outline)", marginTop: 4 }}>
-                    Status: <strong style={{ textTransform: "uppercase" }}>{activeRun.status}</strong> Â· Steps: {activeRun.stepsExecuted || 0}/{activeRun.maxSteps} Â· Model: {activeRun.model}
+                  <div aria-live="polite" role="status" style={{ fontSize: "0.82rem", color: "var(--md-sys-color-outline)", marginTop: 6 }}>
+                    <strong style={{ color: RUN_STATUS_COLORS[activeRun.status] || "var(--md-sys-color-outline)" }}>{RUN_STATUS_LABELS[activeRun.status] || "Run status unavailable"}</strong>
+                    <span> · Steps: {activeRun.stepsExecuted || 0}/{activeRun.maxSteps || maxSteps} · Tools: {activeRun.toolsExecuted || 0} · Model: {activeRun.model || "Not reported"}</span>
                   </div>
+                  {activeRun.error && <div role="alert" style={{ marginTop: 6, color: "var(--md-sys-color-error)", fontSize: "0.82rem" }}>{activeRun.error}</div>}
                 </div>
-                <span className="abyx-pill" style={{ textTransform: "capitalize" }}>{activeRun.status}</span>
+                <span className="abyx-pill" style={{ color: RUN_STATUS_COLORS[activeRun.status], textTransform: "none" }}>{RUN_STATUS_LABELS[activeRun.status] || "Unknown"}</span>
               </div>
 
               {/* Timeline Stream */}
@@ -539,13 +716,13 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
               <h3 style={{ margin: "0 0 12px 0", fontSize: "0.95rem" }}>Past Agent Runs History</h3>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {runHistory.slice(0, 5).map((r) => (
-                  <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "var(--card-bg)", borderRadius: 6, border: "1px solid var(--border-color)", cursor: "pointer" }} onClick={() => setActiveRun(r)}>
+                  <button type="button" key={r.id} aria-label={`View run: ${r.goal}`} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 14px", background: "var(--card-bg)", color: "var(--md-sys-color-on-surface)", textAlign: "left", borderRadius: 6, border: "1px solid var(--border-color)", cursor: "pointer" }} onClick={() => setActiveRun(r)}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>{r.goal}</div>
                       <div style={{ fontSize: "0.74rem", color: "var(--md-sys-color-outline)" }}>{new Date(r.startTime).toLocaleString()} Â· {r.stepsExecuted || 0} steps Â· {r.model}</div>
                     </div>
                     <span className="abyx-pill" style={{ textTransform: "capitalize" }}>{r.status}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -757,7 +934,7 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
           {/* Search & URL Bar */}
           <div className="abyx-section-card">
             <h2 className="abyx-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Globe size={18} color="var(--md-sys-color-primary)" /> Sandboxed Web Search &amp; Browser Reader
+              <Globe size={18} color="var(--md-sys-color-primary)" /> Web Search &amp; Browser Reader
             </h2>
             <p style={{ fontSize: "0.85rem", color: "var(--md-sys-color-outline)", marginTop: 4, marginBottom: 14 }}>
               Execute live web search without tracking or browse public web pages with automated readability extraction and SSRF protection.
@@ -914,6 +1091,168 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
         </div>
       )}
 
+      {activeTab === "tools" && (
+        <div className="abyx-section-card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div>
+              <h2 className="abyx-section-title" style={{ margin: 0 }}>Registered Tools</h2>
+              <p style={{ margin: "6px 0 0", color: "var(--md-sys-color-outline)", fontSize: "0.82rem" }}>
+                Agent capabilities pass through the shared registry and authorization gateway. Individual settings and bundles are saved to this profile.
+              </p>
+            </div>
+            <button className="abyx-btn" onClick={loadTools}><RefreshCw size={14} /> Refresh</button>
+          </div>
+          <h3 style={{ margin: "22px 0 8px" }}>Capability bundles</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, marginBottom: 18 }}>
+            {registeredBundles.map(bundle => (
+              <div key={bundle.id} style={{ padding: 12, borderRadius: 8, background: "var(--card-bg)", border: "1px solid var(--border-color)" }}>
+                <strong>{bundle.name}</strong>
+                <div style={{ color: "var(--md-sys-color-outline)", fontSize: "0.78rem", margin: "5px 0 10px" }}>{bundle.description}</div>
+                <button className="abyx-btn" onClick={async () => {
+                  try { await setAgentToolBundleEnabled(bundle.id, !bundle.enabled); await loadTools(); }
+                  catch (err) { showAlert?.({ title: "Bundle setting failed", message: err.message, danger: true }); }
+                }}>{bundle.enabled ? "Disable bundle" : "Enable bundle"} · {bundle.toolIds.length} tools</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {registeredTools.map((tool) => (
+              <div key={tool.id} style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) auto", gap: 12, alignItems: "center", padding: 12, borderRadius: 8, background: "var(--card-bg)", border: "1px solid var(--border-color)" }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
+                    <code>{tool.id}</code><span className="abyx-pill">{tool.riskCategory}</span>
+                  </div>
+                  <div style={{ fontSize: "0.8rem", color: "var(--md-sys-color-outline)", marginTop: 4 }}>{tool.description}</div>
+                  <div style={{ fontSize: "0.72rem", color: "var(--md-sys-color-outline)", marginTop: 5 }}>
+                    v{tool.version} · {tool.provenance?.source} · {tool.permissions?.join(", ") || "no declared permissions"}
+                  </div>
+                </div>
+                <button className="abyx-btn" onClick={async () => {
+                  try {
+                    await setAgentToolEnabled(tool.id, !tool.enabled);
+                    await loadTools();
+                  } catch (err) {
+                    showAlert?.({ title: "Tool setting failed", message: err.message, danger: true });
+                  }
+                }}>{tool.enabled ? "Disable" : "Enable"}</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "mcp" && (
+        <div style={{ display: "grid", gap: 16 }}>
+          <div className="abyx-section-card">
+            <h2 className="abyx-section-title">Add an MCP stdio server</h2>
+            <p style={{ color: "var(--md-sys-color-outline)", fontSize: "0.82rem" }}>
+              Starting a server runs its configured program with your account permissions. It is a separate process, not an OS sandbox. Plaintext environment variables are not saved or passed through.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <input className="abyx-input" placeholder="Server ID (for example, docs-server)" value={mcpName} onChange={event => setMcpName(event.target.value)} />
+              <input className="abyx-input" placeholder="Program (for example, node)" value={mcpCommand} onChange={event => setMcpCommand(event.target.value)} />
+              <input className="abyx-input" style={{ gridColumn: "1 / -1" }} placeholder='Arguments as JSON array (for example, ["server.js"])' value={mcpArgs} onChange={event => setMcpArgs(event.target.value)} />
+            </div>
+            <button className="abyx-btn primary" style={{ marginTop: 10 }} disabled={!mcpName.trim() || !mcpCommand.trim()} onClick={async () => {
+              try {
+                const parsedArgs = mcpArgs.trim() ? JSON.parse(mcpArgs) : [];
+                if (!Array.isArray(parsedArgs) || parsedArgs.some(arg => typeof arg !== "string")) throw new Error("Arguments must be a JSON array of strings.");
+                if (!window.confirm(`Save ${mcpName} with the mcp:call capability? Every external tool call will still require Abyx approval. Starting it later runs the configured program with your account permissions.`)) return;
+                await addMcpServer({ name: mcpName, command: mcpCommand, args: parsedArgs, grantedPermissions: ["mcp:call"] });
+                setMcpName(""); setMcpCommand(""); setMcpArgs("");
+                await loadBaseData();
+              } catch (err) {
+                showAlert?.({ title: "MCP server setup failed", message: err.message, danger: true });
+              }
+            }}><Plug size={14} /> Save server</button>
+          </div>
+          <div className="abyx-section-card">
+            <h2 className="abyx-section-title">Configured servers</h2>
+            <div style={{ display: "grid", gap: 10 }}>
+              {Object.entries(mcpState.servers).filter(([id]) => id !== "local_tools").map(([id, server]) => {
+                const state = mcpState.status[id] || {};
+                return <div key={id} style={{ padding: 14, borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--card-bg)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                    <div><strong>{id}</strong><div style={{ fontSize: "0.78rem", color: "var(--md-sys-color-outline)", marginTop: 4 }}>{server.command} {(server.args || []).join(" ")}</div><div style={{ fontSize: "0.75rem", marginTop: 4 }}>Status: {state.status || "disconnected"} · {state.transport || server.transport || "stdio"}</div></div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {state.status === "connected" ? <button className="abyx-btn" onClick={async () => { await disconnectMcpServer(id); await loadBaseData(); }}>Disconnect</button> : <button className="abyx-btn primary" onClick={async () => {
+                        const commandPreview = `${server.command} ${(server.args || []).join(" ")}`;
+                        if (!window.confirm(`Start this MCP server as a separate process with your account permissions?\n\n${commandPreview}\n\nIt will not be OS-isolated.`)) return;
+                        try { await connectMcpServer(id, true); await loadBaseData(); await loadTools(); }
+                        catch (err) { showAlert?.({ title: "MCP connection failed", message: err.message, danger: true }); }
+                      }}>Connect</button>}
+                      <button className="abyx-btn" onClick={async () => { await toggleMcpServer(id, !server.enabled); await loadBaseData(); }}>{server.enabled === false ? "Enable" : "Disable"}</button>
+                      <button className="abyx-btn danger" onClick={async () => { if (window.confirm(`Remove MCP server ${id}?`)) { await deleteMcpServer(id); await loadBaseData(); } }}>Remove</button>
+                    </div>
+                  </div>
+                  {(mcpState.tools || []).filter(tool => tool.function?.name.startsWith(`mcp.${id}.`)).map(tool => <div key={tool.function.name} style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border-color)", fontSize: "0.78rem" }}><code>{tool.function.name}</code> — {tool.function.description}</div>)}
+                </div>;
+              })}
+              {Object.keys(mcpState.servers).filter(id => id !== "local_tools").length === 0 && <p style={{ color: "var(--md-sys-color-outline)" }}>No MCP servers configured.</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "extensions" && (
+        <div className="abyx-section-card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <div>
+              <h2 className="abyx-section-title" style={{ margin: 0 }}>Skills and extensions</h2>
+              <p style={{ color: "var(--md-sys-color-outline)", fontSize: "0.82rem" }}>
+                Installing a package is code or instruction ingestion. Instruction skills receive no tool permissions. Executable extensions remain disabled because Abyx has no isolated extension host.
+              </p>
+            </div>
+            <button className="abyx-btn primary" onClick={async () => {
+              const source = window.prompt("Enter a local package path or supported GitHub source:");
+              if (!source) return;
+              try {
+                const inspected = await inspectExtension(source);
+                const permissions = inspected.permissions || [];
+                const manifest = inspected.manifest || {};
+                const message = `Install ${manifest.kind || "extension"} ${manifest.name || manifest.id} v${manifest.version}?\n\nRequested permissions: ${permissions.length ? permissions.join(", ") : "none"}\n\n${manifest.kind === "skill" ? "Skill text can influence model output but cannot grant tool permissions." : "Executable code will be stored but remains disabled; no OS-isolated runner is configured."}`;
+                if (!window.confirm(message)) return;
+                await installExtension(source, permissions, inspected.contentHash, true);
+                const refreshed = await getExtensions();
+                setExtensions(refreshed.extensions || []);
+                showAlert?.({ title: "Package installed", message: "The package was recorded with its provenance and reviewed permissions." });
+              } catch (err) {
+                showAlert?.({ title: "Package installation failed", message: err.message, danger: true });
+              }
+            }}>Install package</button>
+          </div>
+          <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+            {extensions.map(extension => (
+              <div key={extension.id} style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) auto", gap: 12, alignItems: "center", padding: 12, borderRadius: 8, background: "var(--card-bg)", border: "1px solid var(--border-color)" }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600 }}>{extension.name} <span className="abyx-pill">{extension.kind}</span><span className="abyx-pill">{extension.status}</span></div>
+                  <div style={{ color: "var(--md-sys-color-outline)", fontSize: "0.78rem", marginTop: 4 }}>{extension.description}</div>
+                  <div style={{ color: "var(--md-sys-color-outline)", fontSize: "0.72rem", marginTop: 4 }}>v{extension.version} · {extension.trustLevel || "unverified"} · {extension.provenance?.contentHash || "no content hash"}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="abyx-btn" onClick={async () => {
+                    const source = window.prompt(`Enter the updated package path or supported GitHub source for ${extension.id}:`);
+                    if (!source) return;
+                    try {
+                      const inspected = await inspectExtension(source);
+                      const permissions = inspected.permissions || [];
+                      if (inspected.manifest?.id !== extension.id) throw new Error("The update package ID does not match this installed package.");
+                      const approved = window.confirm(`Update ${extension.name} to v${inspected.manifest?.version}?\n\nRequested permissions: ${permissions.length ? permissions.join(", ") : "none"}\n\nContent hash: ${inspected.contentHash}`);
+                      if (!approved) return;
+                      await updateExtension(extension.id, source, permissions, inspected.contentHash, true);
+                      const refreshed = await getExtensions(); setExtensions(refreshed.extensions || []);
+                    } catch (err) { showAlert?.({ title: "Package update failed", message: err.message, danger: true }); }
+                  }}>Update</button>
+                  {extension.kind === "skill" && <button className="abyx-btn" onClick={async () => { try { await setExtensionEnabled(extension.id, extension.status !== "enabled"); const r = await getExtensions(); setExtensions(r.extensions || []); } catch (err) { showAlert?.({ title: "Skill update failed", message: err.message, danger: true }); } }}>{extension.status === "enabled" ? "Deactivate" : "Activate"}</button>}
+                  <button className="abyx-btn danger" onClick={async () => { if (window.confirm(`Uninstall ${extension.name}?`)) { try { await uninstallExtension(extension.id); const r = await getExtensions(); setExtensions(r.extensions || []); } catch (err) { showAlert?.({ title: "Uninstall failed", message: err.message, danger: true }); } } }}>Uninstall</button>
+                </div>
+              </div>
+            ))}
+            {!extensions.length && <p style={{ color: "var(--md-sys-color-outline)" }}>No installed extension packages.</p>}
+          </div>
+        </div>
+      )}
+
       {/* ======================================================== */}
       {/* TAB 5: MICROKERNEL SEAMS & ARCHITECTURE                 */}
       {/* ======================================================== */}
@@ -937,9 +1276,9 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
               <span className="abyx-stat-meta">Live capability providers</span>
             </div>
             <div className="abyx-stat-card">
-              <span className="abyx-stat-label">Sandbox Security</span>
-              <span className="abyx-stat-value" style={{ fontSize: "1.35rem", color: "var(--md-sys-color-success)" }}>Enforced</span>
-              <span className="abyx-stat-meta">Windows DPAPI &amp; Workspace Isolation</span>
+              <span className="abyx-stat-label">OS Isolation</span>
+              <span className="abyx-stat-value" style={{ fontSize: "1.15rem", color: "var(--md-sys-color-error)" }}>Unavailable</span>
+              <span className="abyx-stat-meta">Untrusted code execution is disabled; approved terminal commands run on this host.</span>
             </div>
           </div>
 
@@ -959,7 +1298,7 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>seam:{key}</div>
-                      <div style={{ fontSize: "0.75rem", color: "var(--md-sys-color-outline)" }}>{typeof s === "object" ? s.description : "Bound & Sandboxed"}</div>
+                      <div style={{ fontSize: "0.75rem", color: "var(--md-sys-color-outline)" }}>{typeof s === "object" ? s.description : "Policy checked"}</div>
                     </div>
                     <CheckCircle2 size={16} color="var(--md-sys-color-success)" />
                   </div>
@@ -994,6 +1333,16 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
           <TerminalConsole />
         </div>
       )}
+
+      {/* Harness & Model Runtime Controls Drawer */}
+      <HarnessControlsDrawer
+        isOpen={isControlsOpen}
+        onClose={() => setIsControlsOpen(false)}
+        onConfigSaved={() => {
+          loadBaseData();
+          loadAgentRuns();
+        }}
+      />
     </div>
   );
 }

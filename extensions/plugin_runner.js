@@ -34,6 +34,8 @@ class PluginRunner {
       throw new Error(`Plugin "${pluginId}" is disabled`);
     }
 
+    throw new Error('Executable extension launch is disabled until a platform-isolated extension host is configured');
+
     const installRoot = fs.realpathSync(ext.installPath);
     const entryFile = path.resolve(installRoot, ext.entryPoint);
     const realEntry = fs.realpathSync(entryFile);
@@ -70,11 +72,7 @@ class PluginRunner {
    * @param {Object} context 
    */
   async executePluginTool(pluginId, toolName, args = {}, context = {}) {
-    let loaded = this.loadedPlugins.get(pluginId);
-    if (!loaded) {
-      this.loadPlugin(pluginId);
-      loaded = this.loadedPlugins.get(pluginId);
-    }
+    this.loadPlugin(pluginId);
 
     const { record, module } = loaded;
     const granted = record.grantedPermissions || [];
@@ -133,19 +131,7 @@ class PluginRunner {
     const tools = [];
 
     for (const ext of extensions) {
-      if (ext.kind === ExtensionKind.PLUGIN && ext.status === ExtensionStatus.ENABLED) {
-        for (const t of ext.tools || []) {
-          tools.push({
-            pluginId: ext.id,
-            pluginName: ext.name,
-            name: `${ext.id}__${t.name}`,
-            originalName: t.name,
-            description: `[Plugin: ${ext.name}] ${t.description}`,
-            parameters: t.parameters || {},
-            grantedPermissions: ext.grantedPermissions
-          });
-        }
-      }
+      if (ext.kind === ExtensionKind.PLUGIN && ext.status === ExtensionStatus.ENABLED) continue;
     }
 
     return tools;

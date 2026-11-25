@@ -1,0 +1,10 @@
+order_id,region,product,qty,unit_price
+1,North,Widget,2,10
+2,North,Gizmo,1,15
+3,South,Widget,3,10
+4,South,Gizmo,2,15
+5,North,Widget,1,10
+6,West,Widget,4,10
+7,West,Gizmo,2,15
+8,South,Widget,,10
+9,East,Gizmo,1,15

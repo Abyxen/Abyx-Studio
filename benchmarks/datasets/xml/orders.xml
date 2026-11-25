@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<orders>
+  <order id="x-1"><region>North</region><amount>25</amount></order>
+  <order id="x-2"><region>South</region><amount>30</amount></order>
+  <order id="x-3"><region>West</region><amount>70</amount></order>
+</orders>

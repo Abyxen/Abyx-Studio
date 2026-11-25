@@ -22,11 +22,10 @@ const {
   createTimelineEvent
 } = require('./types');
 const ExecutionLogger = require('./execution_logger');
-const universalFileGenerator = require('../services/universal_file_generator');
-const browserService = require('../services/browser_service');
+const { validateValue } = require('./tool_gateway');
 
 class AgentExecutionEngine extends EventEmitter {
-  constructor({ pathGuard, policyEngine, fsTool, terminalTool, browserTool, providerRegistry } = {}) {
+  constructor({ pathGuard, policyEngine, fsTool, terminalTool, browserTool, providerRegistry, toolRegistry, toolGateway } = {}) {
     super();
     this.pathGuard = pathGuard;
     this.policyEngine = policyEngine;
@@ -34,9 +33,15 @@ class AgentExecutionEngine extends EventEmitter {
     this.terminalTool = terminalTool;
     this.browserTool = browserTool;
     this.providerRegistry = providerRegistry;
+    this.toolRegistry = toolRegistry || null;
+    this.toolGateway = toolGateway || null;
 
     // Active runs registry: runId -> { run, controller, approvalResolvers: Map }
     this.activeRuns = new Map();
+    this.toolGateway?.on('audit', event => {
+      const active = event.runId ? this.activeRuns.get(event.runId) : null;
+      if (active) this.emitTimeline(active.run, 'tool_gateway_audit', event, active.onEvent);
+    });
   }
 
   /**
@@ -109,87 +114,20 @@ class AgentExecutionEngine extends EventEmitter {
   /**
    * Dispatches a tool call to the appropriate restricted tool module
    */
-  async executeToolInternal(toolName, args, signal) {
-    const t0 = Date.now();
-    let res;
-
-    try {
-      // 1. Filesystem Tools
-      if (toolName === 'fs_list' || toolName === 'list_files') {
-        res = await this.fsTool.list(args);
-      } else if (toolName === 'fs_read' || toolName === 'read_file') {
-        res = await this.fsTool.read(args);
-      } else if (toolName === 'fs_search' || toolName === 'search_files') {
-        res = await this.fsTool.search(args);
-      } else if (toolName === 'fs_write' || toolName === 'write_file') {
-        res = await this.fsTool.write({
-          filePath: args.filePath || args.file_path || args.path || args.filename,
-          content: args.content || ''
-        });
-      } else if (toolName === 'fs_edit' || toolName === 'edit_file') {
-        res = await this.fsTool.edit({
-          filePath: args.filePath || args.file_path || args.path,
-          target: args.target,
-          replacement: args.replacement
-        });
-      } else if (toolName === 'fs_mkdir' || toolName === 'mkdir' || toolName === 'create_directory') {
-        res = await this.fsTool.mkdir({
-          dirPath: args.dirPath || args.path || args.directory
-        });
-      } else if (toolName === 'fs_move' || toolName === 'move_file' || toolName === 'rename_file') {
-        res = await this.fsTool.move({
-          sourcePath: args.sourcePath || args.source || args.from || args.oldPath,
-          destinationPath: args.destinationPath || args.destination || args.to || args.newPath
-        });
-      } else if (toolName === 'fs_delete' || toolName === 'delete_file') {
-        res = await this.fsTool.delete({
-          filePath: args.filePath || args.path || args.file
-        });
-      }
-
-      // Universal Document & PDF Generator
-      else if (toolName === 'generate_file' || toolName === 'generate_pdf' || toolName === 'generate_document') {
-        const fileType = toolName === 'generate_pdf' ? 'pdf' : (args.fileType || args.type || 'txt');
-        res = await universalFileGenerator.generateFile({
-          filePath: args.filePath || args.file_path || args.path || args.filename,
-          fileType,
-          content: args.content || '',
-          title: args.title,
-          author: args.author
-        });
-      }
-
-      // 2. Controlled Terminal Execution
-      else if (toolName === 'execute_terminal_command' || toolName === 'run_terminal') {
-        res = await this.terminalTool.execute({
-          command: args.command,
-          cwd: args.cwd,
-          timeoutMs: args.timeoutMs,
-          signal
-        });
-      }
-
-      // 3. Controlled Web / Browser Tools
-      else if (toolName === 'search_web') {
-        res = await this.browserTool.searchWeb({ query: args.query, maxResults: args.maxResults });
-      } else if (toolName === 'fetch_web_page' || toolName === 'browse_url' || toolName === 'browse_page') {
-        res = await this.browserTool.fetchPage({ url: args.url, signal });
-      } else if (toolName === 'open_browser') {
-        res = browserService.openBrowserWindow(args.url);
-      }
-
-      else {
-        res = { success: false, error: `Unrecognized tool: ${toolName}` };
-      }
-    } catch (toolErr) {
-      res = { success: false, error: toolErr.message };
-    }
-
-    const durationMs = Date.now() - t0;
+  async #executeToolInternal(toolName, args, signal, approvalId = null, context = {}) {
+    if (!this.toolGateway) return { success: false, output: { success: false, error: 'Tool Gateway is unavailable' }, durationMs: 0 };
+    const result = await this.toolGateway.execute({
+      toolId: toolName,
+      args,
+      signal,
+      context: { ...context, approvalId }
+    });
     return {
-      success: res.success !== false,
-      output: res,
-      durationMs
+      success: result.success === true && result.output?.success !== false,
+      output: result.output === undefined ? { success: false, error: result.error || 'Tool execution failed' } : result.output,
+      durationMs: result.durationMs || 0,
+      denied: result.denied === true,
+      requiresApproval: result.requiresApproval === true
     };
   }
 
@@ -228,15 +166,17 @@ class AgentExecutionEngine extends EventEmitter {
       goal,
       model,
       plan: effectivePlan,
-      maxSteps: Math.min(maxSteps || 8, 15) // Hard ceiling of 15 steps
+      maxSteps: Math.min(Math.max(Number(maxSteps) || 8, 1), 30) // Scaled autonomous ceiling of 30 steps
     });
     run.profileId = profileId;
+    run.subtasks = [];
 
     const controller = new AbortController();
     const activeEntry = {
       run,
       controller,
-      approvalResolvers: new Map()
+      approvalResolvers: new Map(),
+      onEvent
     };
     this.activeRuns.set(run.id, activeEntry);
 
@@ -306,6 +246,18 @@ class AgentExecutionEngine extends EventEmitter {
         currentPlanStep.status = StepStatus.COMPLETED;
         currentPlanStep.endTime = new Date().toISOString();
 
+        if (stepOutput && stepOutput.subtask) {
+          const subtaskRecord = {
+            id: `subtask_${run.subtasks.length + 1}`,
+            title: String(stepOutput.subtask),
+            status: stepOutput.status || 'in_progress',
+            stepNumber: currentPlanStep.stepNumber,
+            timestamp: new Date().toISOString()
+          };
+          run.subtasks.push(subtaskRecord);
+          this.emitTimeline(run, 'subtask_updated', subtaskRecord, onEvent);
+        }
+
         this.emitTimeline(run, 'step_completed', {
           stepNumber: currentPlanStep.stepNumber,
           description: currentPlanStep.description,
@@ -360,19 +312,53 @@ class AgentExecutionEngine extends EventEmitter {
   async requestAndExecuteTool(run, step, toolName, toolArgs, signal, onEvent) {
     run.toolsExecuted++;
 
+    const definition = this.toolRegistry?.get(toolName);
+    if (!definition || !definition.enabled) {
+      return this.toolGateway?.reject({ toolId: toolName, context: { runId: run.id, callId: `rejected_${Date.now()}` }, error: `Tool "${toolName}" is not registered or is disabled` }) || { success: false, denied: true, error: `Tool "${toolName}" is not registered or is disabled` };
+    }
+    const schemaError = validateValue(toolArgs, definition.inputSchema);
+    if (schemaError) {
+      return this.toolGateway.reject({ toolId: toolName, context: { runId: run.id, callId: `invalid_${Date.now()}` }, error: `Invalid tool arguments: ${schemaError}` });
+    }
+
     // 1. Detect if target file exists (for overwrite risk evaluation)
     let isOverwrite = false;
+    let changePreview = null;
     if (['fs_write', 'write_file', 'generate_file'].includes(toolName)) {
       const p = toolArgs.filePath || toolArgs.file_path || toolArgs.path || toolArgs.filename;
       try {
         const safeP = this.pathGuard.resolveSafePath(p, { allowCreate: true });
         isOverwrite = require('node:fs').existsSync(safeP);
-      } catch (e) {}
+        if (toolName === 'fs_write') {
+          const fs = require('node:fs');
+          const original = isOverwrite ? fs.readFileSync(safeP, 'utf8') : '';
+          const currentHash = isOverwrite ? require('node:crypto').createHash('sha256').update(original).digest('hex') : null;
+          if (isOverwrite && (!toolArgs.expectedHash || toolArgs.expectedHash !== currentHash)) {
+            return { success: false, conflict: true, error: 'File changed or was not read before editing; inspect it again before requesting approval.' };
+          }
+          if (!isOverwrite && toolArgs.expectedHash) return { success: false, conflict: true, error: 'Target file appeared after review; inspect it again.' };
+          const updated = toolArgs.content || '';
+          const diff = this.fsTool.computeDiff(original, updated);
+          changePreview = (JSON.stringify(diff.summary) + '\n' + diff.diffLines.slice(0, 80).map(line => `${line.type === 'added' ? '+' : line.type === 'deleted' ? '-' : ' '} ${line.text}`).join('\n')).slice(0, 8000);
+        }
+      } catch (e) { return { success: false, denied: true, error: 'File path could not be safely reviewed.' }; }
+    } else if (toolName === 'fs_edit') {
+      try {
+        const safeP = this.pathGuard.resolveSafePath(toolArgs.filePath);
+        const original = require('node:fs').readFileSync(safeP, 'utf8');
+        const hash = require('node:crypto').createHash('sha256').update(original).digest('hex');
+        if (!toolArgs.expectedHash || toolArgs.expectedHash !== hash) return { success: false, conflict: true, error: 'File changed or was not read before editing; inspect it again before requesting approval.' };
+        const occurrences = original.split(toolArgs.target).length - 1;
+        if (occurrences !== 1) return { success: false, conflict: true, error: 'Edit target must match exactly once; inspect the file and revise the edit.' };
+        const diff = this.fsTool.computeDiff(original, original.replace(toolArgs.target, toolArgs.replacement));
+        changePreview = (JSON.stringify(diff.summary) + '\n' + diff.diffLines.slice(0, 80).map(line => `${line.type === 'added' ? '+' : line.type === 'deleted' ? '-' : ' '} ${line.text}`).join('\n')).slice(0, 8000);
+      } catch (e) { return { success: false, denied: true, error: 'File path could not be safely reviewed.' }; }
     }
 
     // 2. Central Policy Engine Evaluation
     const policyResult = this.policyEngine.evaluateToolCall(toolName, toolArgs, {
       isOverwrite,
+      changePreview,
       profilePermissions: {}
     });
 
@@ -497,7 +483,11 @@ class AgentExecutionEngine extends EventEmitter {
       name: toolName
     }, onEvent);
 
-    const result = await this.executeToolInternal(toolName, toolArgs, signal);
+    const result = await this.#executeToolInternal(toolName, toolArgs, signal, toolCall.approvalId, {
+      runId: run.id,
+      callId: toolCall.id,
+      policyContext: { isOverwrite }
+    });
 
     toolCall.status = result.success ? 'completed' : 'failed';
     toolCall.completedAt = new Date().toISOString();

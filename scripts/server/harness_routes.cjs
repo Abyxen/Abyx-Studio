@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
+const { execFile } = require("child_process");
 
 // Agent & Harness modules
 const { createAgentEngine, PathGuard, PolicyEngine, ExecutionLogger } = require("../../agent");
@@ -10,11 +10,18 @@ const browserService = require("../../services/browser_service");
 const abyxSkills = require("../../services/abyx_skills");
 const researchSkills = require("../../services/research_skills");
 const { harness, getHarnessStatus, SEAMS } = require("../../harness");
+const { redactError } = require("../../security/local_server_guard");
+const mcpClient = require("../../services/mcp_client");
+
+let contextManager = null;
+try {
+  contextManager = require("../../services/context_manager");
+} catch (_) {}
 
 // Runtime cache for agent engines per profile and workspace
 const agentRuntimes = new Map();
 
-function getAgentRuntime(workspaceService, profileId = "prof_default") {
+function getAgentRuntime(workspaceService, profileId = "prof_default", aiProviders = null) {
   const workspace = workspaceService?.getActiveWorkspace?.();
   const workspaceId = workspace?.id || "default";
   const workspacePath = workspace?.path || universalFileGenerator.WORKSPACE_DIR;
@@ -23,22 +30,222 @@ function getAgentRuntime(workspaceService, profileId = "prof_default") {
   if (!agentRuntimes.has(runtimeKey)) {
     const engine = createAgentEngine({
       approvedRoots: [workspacePath],
+      workspaceRoot: workspacePath,
+      profileId,
       allowTerminal: true,
       allowBrowser: true,
       approvalTimeoutMs: 300000,
+      aiProviders
     });
     agentRuntimes.set(runtimeKey, engine);
   }
   return agentRuntimes.get(runtimeKey);
 }
 
+function applyToolProfile(runtime, profileId, db) {
+  const overrides = db?.getProfileSetting?.(profileId, "agent_tool_enabled", {}) || {};
+  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return;
+  for (const [id, enabled] of Object.entries(overrides)) {
+    if (typeof enabled === "boolean" && runtime.toolRegistry.get(id)) runtime.toolRegistry.setEnabled(id, enabled);
+  }
+}
+
 /**
  * Master Harness & Agentic Routes Handler
  */
-async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db, readJsonBody, json }) {
+async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db, readJsonBody, json, getLlmSettings, updateLlmSettings, startLlm, isLlmRunning }) {
   const parsedUrl = new URL(req.url, "http://localhost");
   const pathname = parsedUrl.pathname;
   const profileId = "prof_default";
+
+  // ==========================================
+  // 0. HARNESS RUNTIME & MODEL CONFIGURATION
+  // ==========================================
+
+  // GET /api/harness/runtime-config
+  if (req.method === "GET" && pathname === "/api/harness/runtime-config") {
+    const current = typeof getLlmSettings === "function" ? getLlmSettings() : {};
+    return json(res, 200, {
+      ok: true,
+      model: current.model || "None",
+      systemPrompt: current.systemPrompt || "You are a helpful local AI assistant.",
+      contextSize: current.contextSize || 4096,
+      temperature: Number.isFinite(current.temperature) ? current.temperature : 0.7,
+      maxTokens: current.maxTokens || 4096,
+      responseTokenMode: current.responseTokenMode || "auto",
+      seed: current.seed ?? -1,
+      performanceProfile: current.performanceProfile || "balanced",
+      preferredBackend: current.preferredBackend || "cuda",
+      threads: current.threads || 8,
+      gpuLayers: current.gpuLayers ?? -1,
+      batchSize: current.batchSize || 512,
+      cacheTypeK: current.cacheTypeK || "q8_0",
+      cacheTypeV: current.cacheTypeV || "q8_0",
+      ropeScaling: current.ropeScaling || "none",
+      ropeFreqScale: Number(current.ropeFreqScale) || 1.0,
+      ropeFreqBase: Number(current.ropeFreqBase) || 0,
+      yarnOrigCtx: Number(current.yarnOrigCtx) || 4096,
+      autonomousMaxSteps: 15,
+      isLlmRunning: typeof isLlmRunning === "function" ? isLlmRunning() : false
+    });
+  }
+
+  // POST /api/harness/runtime-config
+  if (req.method === "POST" && pathname === "/api/harness/runtime-config") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      const current = typeof getLlmSettings === "function" ? getLlmSettings() : {};
+      const updates = {
+        ...(typeof body.systemPrompt === "string" ? { systemPrompt: body.systemPrompt } : {}),
+        ...(body.preferredBackend ? { preferredBackend: body.preferredBackend } : {}),
+        ...(Number.isFinite(Number(body.contextSize)) ? { contextSize: Math.max(512, Math.min(262144, Number(body.contextSize))) } : {}),
+        ...(Number.isFinite(Number(body.temperature)) ? { temperature: Math.max(0, Math.min(2.0, Number(body.temperature))) } : {}),
+        ...(Number.isFinite(Number(body.maxTokens)) ? { maxTokens: Math.max(128, Math.min(16384, Number(body.maxTokens))) } : {}),
+        ...(body.responseTokenMode ? { responseTokenMode: body.responseTokenMode } : {}),
+        ...(Number.isFinite(Number(body.seed)) ? { seed: Number(body.seed) } : {}),
+        ...(body.performanceProfile ? { performanceProfile: body.performanceProfile } : {}),
+        ...(Number.isFinite(Number(body.threads)) ? { threads: Math.max(1, Math.min(64, Number(body.threads))) } : {}),
+        ...(Number.isFinite(Number(body.gpuLayers)) ? { gpuLayers: Number(body.gpuLayers) } : {}),
+        ...(Number.isFinite(Number(body.batchSize)) ? { batchSize: Math.max(128, Math.min(2048, Number(body.batchSize))) } : {}),
+        ...(body.cacheTypeK ? { cacheTypeK: body.cacheTypeK } : {}),
+        ...(body.cacheTypeV ? { cacheTypeV: body.cacheTypeV } : {}),
+        ...(body.ropeScaling ? { ropeScaling: body.ropeScaling } : {}),
+        ...(Number.isFinite(Number(body.ropeFreqScale)) ? { ropeFreqScale: Number(body.ropeFreqScale) } : {}),
+        ...(Number.isFinite(Number(body.ropeFreqBase)) ? { ropeFreqBase: Number(body.ropeFreqBase) } : {}),
+        ...(Number.isFinite(Number(body.yarnOrigCtx)) ? { yarnOrigCtx: Number(body.yarnOrigCtx) } : {})
+      };
+
+      if (typeof updateLlmSettings === "function") {
+        updateLlmSettings(updates);
+      }
+
+      if (body.restartLlm === true && typeof startLlm === "function" && current.model) {
+        try {
+          await startLlm({ ...current, ...updates });
+        } catch (startErr) {
+          console.warn("[HARNESS] Model restart on config change:", startErr.message);
+        }
+      }
+
+      const merged = typeof getLlmSettings === "function" ? getLlmSettings() : { ...current, ...updates };
+      return json(res, 200, { ok: true, settings: merged });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // ==========================================
+  // 0.5. MULTI-AGENT SWARM ORCHESTRATION API
+  // ==========================================
+
+  // GET /api/orchestrator/agents (List 12 specialized agents + custom agents)
+  if (req.method === "GET" && pathname === "/api/orchestrator/agents") {
+    const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
+    return json(res, 200, {
+      ok: true,
+      agents: runtime.orchestrator.agentRegistry.list()
+    });
+  }
+
+  // POST /api/orchestrator/custom-agent (Create or update custom specialized agent)
+  if (req.method === "POST" && pathname === "/api/orchestrator/custom-agent") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
+      const agent = runtime.orchestrator.agentRegistry.registerCustom(body);
+      return json(res, 200, { ok: true, agent });
+    } catch (err) {
+      return json(res, 400, { ok: false, error: err.message });
+    }
+  }
+
+  // POST /api/orchestrator/run (Execute multi-agent DAG orchestration with SSE streaming)
+  if (req.method === "POST" && pathname === "/api/orchestrator/run") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      const goal = typeof body.goal === "string" ? body.goal.trim() : typeof body.task === "string" ? body.task.trim() : "";
+      if (!goal || goal.length > 20000) {
+        return json(res, 400, { ok: false, error: "Goal must contain 1 to 20000 characters" });
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+        "Access-Control-Allow-Origin": "*"
+      });
+      res.flushHeaders?.();
+
+      const sendEvent = (eventType, data) => {
+        if (!res.writableEnded) {
+          res.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`);
+        }
+      };
+
+      const requestedModel = typeof body.model === "string" && body.model.length <= 200 ? body.model : "auto";
+      const concurrency = Math.min(Math.max(Number(body.concurrency) || 4, 1), 8);
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : `orch_${Date.now()}`;
+      const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
+
+      const clientAbort = new AbortController();
+      const abortOnDisconnect = () => {
+        if (!res.writableEnded) clientAbort.abort(new Error("Client disconnected"));
+      };
+      res.on("close", abortOnDisconnect);
+      res.once("finish", () => res.removeListener("close", abortOnDisconnect));
+      if (res.destroyed || clientAbort.signal.aborted) {
+        abortOnDisconnect();
+        return true;
+      }
+
+      const report = await runtime.orchestrator.orchestrate({
+        goal,
+        model: requestedModel,
+        concurrency,
+        customTasks: Array.isArray(body.tasks) ? body.tasks : null,
+        profileId,
+        sessionId,
+        signal: clientAbort.signal,
+        onEvent: (type, data) => sendEvent(type, data)
+      });
+
+      sendEvent("orchestration:done", report);
+      res.end();
+      return true;
+    } catch (err) {
+      if (!res.headersSent) {
+        return json(res, 500, { ok: false, error: err.message });
+      } else {
+        res.write(`event: orchestration:error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+        res.end();
+        return true;
+      }
+    }
+  }
+
+  // POST /api/orchestrator/cancel
+  if (req.method === "POST" && pathname === "/api/orchestrator/cancel") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
+      const result = runtime.orchestrator.cancel(body.runId, body.reason);
+      return json(res, 200, result);
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // GET /api/orchestrator/active
+  if (req.method === "GET" && pathname === "/api/orchestrator/active") {
+    const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
+    const active = Array.from(runtime.orchestrator.activeOrchestrations.keys());
+    return json(res, 200, { ok: true, activeRuns: active });
+  }
 
   // ==========================================
   // 1. AGENT POLICIES, RUNS, APPROVALS & RUNNER
@@ -53,6 +260,64 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
       allowTerminal: runtime.policyEngine.options.allowTerminal,
       allowBrowser: runtime.policyEngine.options.allowBrowser,
     });
+  }
+
+  if (req.method === "GET" && pathname === "/api/agent/tools") {
+    const runtime = getAgentRuntime(workspaceService, profileId);
+    mcpClient.registerConnectedTools(runtime.toolRegistry, profileId);
+    applyToolProfile(runtime, profileId, db);
+    return json(res, 200, { ok: true, tools: runtime.toolRegistry.list() });
+  }
+
+  if (req.method === "GET" && pathname === "/api/agent/tool-bundles") {
+    const runtime = getAgentRuntime(workspaceService, profileId);
+    mcpClient.registerConnectedTools(runtime.toolRegistry, profileId);
+    applyToolProfile(runtime, profileId, db);
+    return json(res, 200, { ok: true, bundles: runtime.toolRegistry.listBundles() });
+  }
+
+  if (req.method === "POST" && pathname === "/api/agent/tool-bundles/toggle") {
+    const body = await readJsonBody(req, res);
+    if (!body) return true;
+    if (typeof body.id !== "string" || typeof body.enabled !== "boolean") return json(res, 400, { ok: false, error: "id and enabled are required" });
+    try {
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      mcpClient.registerConnectedTools(runtime.toolRegistry, profileId);
+      applyToolProfile(runtime, profileId, db);
+      const bundle = runtime.toolRegistry.getBundle(body.id);
+      if (!bundle) return json(res, 404, { ok: false, error: "Tool bundle not found" });
+      const overrides = db?.getProfileSetting?.(profileId, "agent_tool_enabled", {}) || {};
+      for (const toolId of bundle.toolIds) {
+        runtime.toolRegistry.setEnabled(toolId, body.enabled);
+        overrides[toolId] = body.enabled;
+      }
+      if (db?.setProfileSetting) db.setProfileSetting(profileId, "agent_tool_enabled", overrides);
+      return json(res, 200, { ok: true, bundles: runtime.toolRegistry.listBundles() });
+    } catch (err) {
+      return json(res, 400, { ok: false, error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/agent/tools/toggle") {
+    const body = await readJsonBody(req, res);
+    if (!body) return true;
+    if (typeof body.id !== "string" || typeof body.enabled !== "boolean") {
+      return json(res, 400, { ok: false, error: "id and enabled are required" });
+    }
+    try {
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      mcpClient.registerConnectedTools(runtime.toolRegistry, profileId);
+      applyToolProfile(runtime, profileId, db);
+      const tool = runtime.toolRegistry.setEnabled(body.id, body.enabled);
+      if (db?.getProfileSetting && db?.setProfileSetting) {
+        const overrides = db.getProfileSetting(profileId, "agent_tool_enabled", {}) || {};
+        overrides[body.id] = body.enabled;
+        db.setProfileSetting(profileId, "agent_tool_enabled", overrides);
+      }
+      return json(res, 200, { ok: true, tool });
+    } catch (err) {
+      return json(res, 404, { ok: false, error: err.message });
+    }
   }
 
   // GET /api/agent/runs
@@ -130,6 +395,248 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
     }
   }
 
+  // Helper to build step executor for agent runs
+  function buildStepExecutor({ task, requestedModel, profileId, body, aiProviders, toolRegistry, onToken = null }) {
+    mcpClient.registerConnectedTools(toolRegistry, profileId);
+    applyToolProfile({ toolRegistry }, profileId, db);
+    const toolDefinitions = toolRegistry.list();
+    const toolNames = toolDefinitions.map(tool => tool.id);
+    const toolContracts = toolDefinitions.map(({ id, description, inputSchema }) => ({ name: id, description, parameters: inputSchema }));
+
+    return async ({ run: activeRun, step, signal, executeTool }) => {
+      const taskLower = task.toLowerCase();
+
+      // 1. Direct command triggers
+      if (activeRun.stepsExecuted === 0 && (taskLower.startsWith("create folder") || taskLower.startsWith("mkdir") || taskLower.includes("create directory"))) {
+        const folderMatch = task.match(/(?:folder|directory|mkdir)\s+['"]?([^'"]+)['"]?/i);
+        const folderPath = folderMatch ? folderMatch[1].trim() : "new_folder";
+        const toolResult = await executeTool("fs_mkdir", { dirPath: folderPath });
+        return { continue: true, message: `Created folder: ${folderPath}`, output: toolResult };
+      }
+
+      if (activeRun.stepsExecuted === 0 && (taskLower.includes("generate pdf") || taskLower.includes("create pdf") || taskLower.endsWith(".pdf"))) {
+        const pdfMatch = task.match(/([a-zA-Z0-9_\-]+\.pdf)/i);
+        const pdfName = pdfMatch ? pdfMatch[1] : "document.pdf";
+        const toolResult = await executeTool("generate_pdf", {
+          filePath: pdfName,
+          title: body.title || "Generated Document",
+          content: body.content || `# Generated Document\n\nTask: ${task}\n\nGenerated by ABYX Agent Harness.`
+        });
+        return { done: true, result: `Successfully generated PDF: ${pdfName}` };
+      }
+
+      // 2. Structured LLM prompt for autonomous tool selection and multi-turn execution
+      const effectiveTemp = Number.isFinite(Number(body.temperature)) ? Number(body.temperature) : undefined;
+      const effectiveMaxTokens = Number.isFinite(Number(body.max_tokens || body.maxTokens)) ? Number(body.max_tokens || body.maxTokens) : undefined;
+
+      const messages = [
+        {
+          role: "system",
+          content: `You are ABYX's autonomous engineering agent with verified tool access. Work methodically to solve the user's task.
+Available tools and argument schemas: ${JSON.stringify(toolContracts)}.
+Return strict JSON only without markdown code blocks:
+{"tool":"<tool_name>","args":{...}}
+or to declare a subtask:
+{"action":"subtask","subtask":"<title>","status":"in_progress"}
+or to complete the run:
+{"done":true,"result":"<final_answer>"}.
+Rules:
+1. Always use lsp_validate_diff or lsp_diagnostics before applying complex code edits to ensure syntax integrity.
+2. If previous tool execution failed with an error, reflect on the error, adjust your arguments or strategy, and self-correct.
+3. Current step ${activeRun.stepsExecuted + 1}/${activeRun.maxSteps}: ${step.description}`
+        },
+        {
+          role: "user",
+          content: `Task: ${task}\n\nExecution timeline & observations:\n${JSON.stringify(
+            activeRun.timeline.slice(-10).map(event => ({
+              type: event.type,
+              name: event.name,
+              args: event.args,
+              result: event.result,
+              success: event.success,
+              error: event.error,
+              description: event.description
+            }))
+          ).slice(0, 10000)}`
+        }
+      ];
+
+      let answer = "";
+      try {
+        if (aiProviders && typeof aiProviders.streamProviderChat === "function") {
+          const resObj = await aiProviders.streamProviderChat({
+            model: requestedModel === "auto" ? "auto" : requestedModel,
+            messages,
+            temperature: effectiveTemp,
+            max_tokens: effectiveMaxTokens,
+            profileId,
+            sessionId: activeRun.sessionId,
+            agentId: activeRun.id,
+            requestType: "agent",
+            signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000),
+            enableFailover: true,
+            onChunk: (chunk) => {
+              if (typeof onToken === "function" && chunk) onToken(chunk);
+            }
+          });
+          answer = resObj?.content || "";
+        }
+      } catch (modelErr) {
+        console.warn("[AGENT] Model call fallback:", modelErr.message);
+      }
+
+      // Parse model JSON action
+      let action = null;
+      try {
+        const jsonMatch = answer.match(/\{[\s\S]*\}/)?.[0];
+        action = jsonMatch ? JSON.parse(jsonMatch) : null;
+      } catch {}
+
+      if (!action || typeof action !== "object") {
+        return { done: true, result: answer || `Step ${activeRun.stepsExecuted + 1} completed.` };
+      }
+
+      if (action.done === true) {
+        return { done: true, result: String(action.result || "Task completed successfully.") };
+      }
+
+      if (action.action === "subtask" && action.subtask) {
+        return { continue: true, subtask: action.subtask, status: action.status || "in_progress", message: `Subtask: ${action.subtask}` };
+      }
+
+      if (!toolNames.includes(action.tool) || !action.args || typeof action.args !== "object" || Array.isArray(action.args)) {
+        return { done: true, result: "The model returned an unsupported or invalid tool action. No tool was executed." };
+      }
+
+      const toolResult = await executeTool(action.tool, action.args);
+      return { continue: true, message: answer, output: toolResult };
+    };
+  }
+
+  // POST /api/agent/stream (Live SSE Streaming for Unified Agent Execution)
+  if (req.method === "POST" && pathname === "/api/agent/stream") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      const task = typeof body.task === "string" ? body.task.trim() : "";
+      if (!task || task.length > 12000) {
+        return json(res, 400, { ok: false, error: "Task must contain 1 to 12000 characters" });
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "Access-Control-Allow-Origin": "*"
+      });
+      res.flushHeaders?.();
+
+      const sendEvent = (eventType, data) => {
+        if (!res.writableEnded) {
+          res.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`);
+        }
+      };
+
+      const requestedModel = typeof body.model === "string" && body.model.length <= 200 ? body.model : "auto";
+      const maxSteps = Math.min(Math.max(Number(body.max_steps) || 8, 1), 30);
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : `agent_${Date.now()}`;
+      const runtime = getAgentRuntime(workspaceService, profileId);
+
+      const clientAbort = new AbortController();
+      const abortOnDisconnect = () => {
+        if (!res.writableEnded) clientAbort.abort(new Error("Client disconnected"));
+      };
+      res.on("close", abortOnDisconnect);
+      res.once("finish", () => res.removeListener("close", abortOnDisconnect));
+      if (res.destroyed) {
+        abortOnDisconnect();
+        return true;
+      }
+      if (clientAbort.signal.aborted) return true;
+
+      const stepExecutor = buildStepExecutor({
+        task,
+        requestedModel,
+        profileId,
+        body,
+        aiProviders,
+        toolRegistry: runtime.toolRegistry,
+        onToken: (tok) => sendEvent("token", { token: tok })
+      });
+
+      const run = await runtime.engine.run({
+        profileId,
+        sessionId,
+        goal: task,
+        model: requestedModel,
+        maxSteps,
+        signal: clientAbort.signal,
+        onEvent: (event) => {
+          sendEvent(event.type || "agent_event", event);
+        },
+        stepExecutor
+      });
+
+      sendEvent("run_done", {
+        ok: run.status === "completed",
+        runId: run.id,
+        status: run.status,
+        output: run.output,
+        stepsExecuted: run.stepsExecuted,
+        toolsExecuted: run.toolsExecuted
+      });
+      res.end();
+      return true;
+    } catch (err) {
+      if (!res.headersSent) {
+        return json(res, 500, { ok: false, error: err.message });
+      } else {
+        res.write(`event: error\ndata: ${JSON.stringify({ error: redactError(err) })}\n\n`);
+        res.end();
+        return true;
+      }
+    }
+  }
+
+  // POST /api/agent/session-permission (Grant session-level tool or command permission)
+  if (req.method === "POST" && pathname === "/api/agent/session-permission") {
+    return json(res, 410, { ok: false, error: "Session-wide grants are disabled; use per-call approval" });
+  }
+
+  // POST /api/context/telemetry (Accurate context estimation and status)
+  if (req.method === "POST" && pathname === "/api/context/telemetry") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      const model = body.model || "default";
+      const maxContext = Number(body.maxContext) || null;
+      const telemetry = contextManager
+        ? contextManager.getTelemetry(messages, model, maxContext, { usage: body.usage, providerId: body.providerId, providerContextWindow: body.providerContextWindow, reservedOutputTokens: body.reservedOutputTokens })
+        : { totalTokens: 0, percentage: 0, status: "safe", maxContext: 8192 };
+      return json(res, 200, { ok: true, ...telemetry });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // POST /api/context/compact (Intelligent conversation compaction)
+  if (req.method === "POST" && pathname === "/api/context/compact") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      if (messages.length > 2000) return json(res, 413, { ok: false, error: 'Too many messages to compact.' });
+      const targetTokens = Number(body.targetTokens) || 4096;
+      const result = contextManager
+        ? contextManager.compactConversation(messages, { maxTargetTokens: targetTokens, activeTask: body.activeTask, artifacts: body.artifacts, recentTurns: body.recentTurns })
+        : { compacted: false, messages };
+      return json(res, 200, { ok: true, ...result });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
   // POST /api/agent/run
   if (req.method === "POST" && pathname === "/api/agent/run") {
     try {
@@ -141,9 +648,18 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
       }
 
       const requestedModel = typeof body.model === "string" && body.model.length <= 200 ? body.model : "auto";
-      const maxSteps = Math.min(Math.max(Number(body.max_steps) || 8, 1), 15);
+      const maxSteps = Math.min(Math.max(Number(body.max_steps) || 8, 1), 30);
       const sessionId = typeof body.sessionId === "string" ? body.sessionId : `agent_${Date.now()}`;
       const runtime = getAgentRuntime(workspaceService, profileId);
+
+      const stepExecutor = buildStepExecutor({
+        task,
+        requestedModel,
+        profileId,
+        body,
+        aiProviders,
+        toolRegistry: runtime.toolRegistry
+      });
 
       const runPromise = runtime.engine.run({
         profileId,
@@ -151,104 +667,7 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
         goal: task,
         model: requestedModel,
         maxSteps,
-        stepExecutor: async ({ run: activeRun, step, signal, executeTool }) => {
-          const toolNames = [
-            "fs_list", "fs_read", "fs_search", "fs_write", "fs_edit", "fs_mkdir", "fs_move", "fs_delete",
-            "generate_file", "generate_pdf", "search_web", "fetch_web_page", "open_browser"
-          ];
-
-          // 1. Check for direct actions or pre-defined pattern triggers in the task
-          const taskLower = task.toLowerCase();
-
-          // If task is explicit about creating a directory/folder
-          if (activeRun.stepsExecuted === 0 && (taskLower.startsWith("create folder") || taskLower.startsWith("mkdir") || taskLower.includes("create directory"))) {
-            const folderMatch = task.match(/(?:folder|directory|mkdir)\s+['"]?([^'"]+)['"]?/i);
-            const folderPath = folderMatch ? folderMatch[1].trim() : "new_folder";
-            const toolResult = await executeTool("fs_mkdir", { dirPath: folderPath });
-            return { continue: true, message: `Created folder: ${folderPath}`, output: toolResult };
-          }
-
-          // If task is explicit about generating a PDF
-          if (activeRun.stepsExecuted === 0 && (taskLower.includes("generate pdf") || taskLower.includes("create pdf") || taskLower.endsWith(".pdf"))) {
-            const pdfMatch = task.match(/([a-zA-Z0-9_\-]+\.pdf)/i);
-            const pdfName = pdfMatch ? pdfMatch[1] : "document.pdf";
-            const toolResult = await executeTool("generate_pdf", {
-              filePath: pdfName,
-              title: body.title || "Generated Document",
-              content: body.content || `# Generated Document\n\nTask: ${task}\n\nGenerated by ABYX Agent Harness.`
-            });
-            return { done: true, result: `Successfully generated PDF: ${pdfName}` };
-          }
-
-          // 2. Invoke LLM for agentic reasoning and tool choice
-          const messages = [
-            {
-              role: "system",
-              content: `You are ABYX's bounded workspace agent. Work strictly toward the user's task. Choose one action per turn.
-Return strict JSON only without markdown fences:
-{"tool":"one of ${toolNames.join(", ")}","args":{...}}
-or
-{"done":true,"result":"..."}.
-Do not claim an action succeeded unless its tool result confirms it. Current step ${activeRun.stepsExecuted}/${activeRun.maxSteps}: ${step.description}`
-            },
-            {
-              role: "user",
-              content: `Task: ${task}\n\nPrevious execution timeline:\n${JSON.stringify(
-                activeRun.timeline.slice(-8).map(event => ({
-                  type: event.type,
-                  name: event.name,
-                  args: event.args,
-                  result: event.result,
-                  success: event.success,
-                  error: event.error,
-                  description: event.description
-                }))
-              ).slice(0, 8000)}`
-            }
-          ];
-
-          let answer = "";
-          try {
-            if (aiProviders && typeof aiProviders.streamProviderChat === "function") {
-              const resObj = await aiProviders.streamProviderChat({
-                model: requestedModel === "auto" ? "auto" : requestedModel,
-                messages,
-                profileId,
-                sessionId: activeRun.sessionId,
-                agentId: activeRun.id,
-                requestType: "agent",
-                signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000),
-                enableFailover: true,
-              });
-              answer = resObj?.content || "";
-            }
-          } catch (modelErr) {
-            console.warn("[AGENT] Model call fallback:", modelErr.message);
-          }
-
-          // Parse model JSON action
-          let action = null;
-          try {
-            const jsonMatch = answer.match(/\{[\s\S]*\}/)?.[0];
-            action = jsonMatch ? JSON.parse(jsonMatch) : null;
-          } catch {}
-
-          if (!action || typeof action !== "object") {
-            // If model returned no tool JSON, complete task with model's text or finish
-            return { done: true, result: answer || `Step ${activeRun.stepsExecuted + 1} completed.` };
-          }
-
-          if (action.done === true) {
-            return { done: true, result: String(action.result || "Task completed successfully.") };
-          }
-
-          if (!toolNames.includes(action.tool) || !action.args || typeof action.args !== "object" || Array.isArray(action.args)) {
-            return { done: true, result: "The model returned an unsupported or invalid tool action. No tool was executed." };
-          }
-
-          const toolResult = await executeTool(action.tool, action.args);
-          return { continue: true, message: answer, output: toolResult };
-        }
+        stepExecutor
       });
 
       // Check if run was backgrounded or completed
@@ -366,8 +785,8 @@ Do not claim an action succeeded unless its tool result confirms it. Current ste
       }
 
       const isFile = fs.statSync(safePath).isFile();
-      const cmd = isFile ? `explorer.exe /select,"${safePath}"` : `explorer.exe "${safePath}"`;
-      exec(cmd, { windowsHide: true }, (err) => {
+      const args = isFile ? [`/select,${safePath}`] : [safePath];
+      execFile("explorer.exe", args, { windowsHide: true }, (err) => {
         if (err) return json(res, 500, { ok: false, error: err.message });
         return json(res, 200, { ok: true, message: `Opened: ${safePath}` });
       });
@@ -508,18 +927,29 @@ Do not claim an action succeeded unless its tool result confirms it. Current ste
       if (!body || !body.command) {
         return json(res, 400, { ok: false, error: "command string is required" });
       }
-      const runtime = getAgentRuntime(workspaceService, profileId);
-      const policyCheck = runtime.policyEngine.evaluateToolCall("execute_terminal_command", { command: body.command });
-      if (policyCheck.riskLevel === "denied") {
-        return json(res, 403, { ok: false, error: `Command blocked by policy: ${policyCheck.reason}` });
+      if (typeof body.command !== "string" || body.command.length > 4096) {
+        return json(res, 400, { ok: false, error: "Command must be a valid string under 4096 characters" });
       }
-      const timeoutMs = Math.min(Math.max(Number(body.timeoutMs) || 15000, 1000), 45000);
-      const result = await runtime.terminalTool.execute({
-        command: body.command,
-        cwd: body.cwd || ".",
-        timeoutMs
+      const cwd = typeof body.cwd === "string" ? body.cwd : ".";
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      const authorization = runtime.policyEngine.authorizeTerminalApiRequest({
+        command: body.command, cwd, approvalId: body.approvalId || null, approved: body.approved === true
       });
-      return json(res, result.success ? 200 : 400, { ok: result.success, ...result });
+      if (authorization.requiresApproval) return json(res, 200, { ok: false, requiresApproval: true, approvalId: authorization.approvalId, preview: authorization.preview });
+      if (!authorization.allowed) return json(res, authorization.status || 403, { ok: false, error: authorization.error });
+      const timeoutMs = Math.min(Math.max(Number(body.timeoutMs) || 15000, 1000), 45000);
+      const clientAbort = new AbortController();
+      const abortOnDisconnect = () => { if (!res.writableEnded) clientAbort.abort(new Error("Client disconnected")); };
+      res.once("close", abortOnDisconnect);
+      const gatewayResult = await runtime.toolGateway.execute({
+        toolId: "execute_terminal_command",
+        args: { command: body.command, cwd, timeoutMs },
+        signal: clientAbort.signal,
+        context: { approvalId: authorization.approvalId, callId: `terminal-api-${Date.now()}` }
+      });
+      res.removeListener("close", abortOnDisconnect);
+      const result = gatewayResult.output || { success: false, error: gatewayResult.error };
+      return json(res, gatewayResult.success && result.success !== false ? 200 : 400, { ok: gatewayResult.success && result.success !== false, ...result });
     } catch (err) {
       return json(res, 500, { ok: false, error: err.message });
     }
@@ -536,8 +966,9 @@ Do not claim an action succeeded unless its tool result confirms it. Current ste
       if (!body) return true;
       const query = typeof body.query === "string" ? body.query.trim() : "";
       if (!query) return json(res, 400, { ok: false, error: "query is required" });
-      const result = await browserService.searchWeb(query);
-      return json(res, 200, { ok: true, ...result });
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      const result = await runtime.toolGateway.execute({ toolId: "search_web", args: { query }, context: { callId: `browser-search-${Date.now()}` } });
+      return json(res, result.success ? 200 : 400, { ok: result.success, ...(result.output || { error: result.error }) });
     } catch (err) {
       return json(res, 500, { ok: false, error: err.message });
     }
@@ -551,8 +982,12 @@ Do not claim an action succeeded unless its tool result confirms it. Current ste
       const url = typeof body.url === "string" ? body.url.trim() : "";
       if (!url) return json(res, 400, { ok: false, error: "url is required" });
       const runtime = getAgentRuntime(workspaceService, profileId);
-      const result = await runtime.browserTool.fetchPage({ url });
-      return json(res, result.success ? 200 : 400, result);
+      const clientAbort = new AbortController();
+      const abortOnDisconnect = () => { if (!res.writableEnded) clientAbort.abort(new Error("Client disconnected")); };
+      res.once("close", abortOnDisconnect);
+      const result = await runtime.toolGateway.execute({ toolId: "fetch_web_page", args: { url }, signal: clientAbort.signal, context: { callId: `browser-fetch-${Date.now()}` } });
+      res.removeListener("close", abortOnDisconnect);
+      return json(res, result.success ? 200 : 400, { ok: result.success, ...(result.output || { error: result.error }) });
     } catch (err) {
       return json(res, 500, { ok: false, error: err.message });
     }
@@ -565,8 +1000,9 @@ Do not claim an action succeeded unless its tool result confirms it. Current ste
       if (!body) return true;
       const url = typeof body.url === "string" ? body.url.trim() : "";
       if (!url) return json(res, 400, { ok: false, error: "url is required" });
-      const result = browserService.openBrowserWindow(url);
-      return json(res, 200, { ok: true, ...result });
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      const result = await runtime.toolGateway.execute({ toolId: "open_browser", args: { url }, context: { callId: `browser-open-${Date.now()}` } });
+      return json(res, result.success ? 200 : 400, { ok: result.success, ...(result.output || { error: result.error }) });
     } catch (err) {
       return json(res, 500, { ok: false, error: err.message });
     }
@@ -751,7 +1187,8 @@ Do not claim an action succeeded unless its tool result confirms it. Current ste
   // GET /api/skills
   if (req.method === "GET" && pathname === "/api/skills") {
     try {
-      const catalog = abyxSkills.getSkillsCatalog(profileId);
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      const catalog = abyxSkills.getSkillsCatalog(profileId, { workspaceRoot: runtime.pathGuard.defaultRoot });
       return json(res, 200, { ok: true, count: catalog.length, skills: catalog });
     } catch (err) {
       return json(res, 500, { ok: false, error: err.message });

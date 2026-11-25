@@ -36,7 +36,7 @@ const SEAMS = {
   MODEL: new CapabilitySeam('model', 'Neural LLM Inference & Cascading Failover Gateway', ['chat', 'stream']),
   MEMORY: new CapabilitySeam('memory', 'Living Brain SQLite Profile & Obsidian Vault Synchronization', ['getProfile', 'getVaultKnowledge', 'saveMessage']),
   FILESYSTEM: new CapabilitySeam('filesystem', 'Desktop & Local Workspace File Management', ['createFolder', 'writeFile', 'readFile']),
-  SANDBOX: new CapabilitySeam('sandbox', 'Subprocess Watchdog Code Execution', ['runCode']),
+  SANDBOX: new CapabilitySeam('sandbox', 'Untrusted code execution disabled until OS isolation is configured', ['runCode']),
   BROWSER: new CapabilitySeam('browser', 'Live Web Navigation, Search & Scraping', ['searchWeb', 'browseUrl']),
   SUBAGENTS: new CapabilitySeam('subagents', 'Specialized Persona Task Delegation', ['getSubagents', 'invoke']),
   TERMINAL: new CapabilitySeam('terminal', 'Workspace-constrained terminal command execution', ['executeCommand'])

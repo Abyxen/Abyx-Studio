@@ -19,7 +19,7 @@ const CORE_SEAM_TOOLS = [
     type: 'function',
     function: {
       name: 'run_code',
-      description: 'Execute Python or JavaScript code inside the safe subprocess sandbox with stdout/stderr capture.',
+      description: 'Untrusted code execution is unavailable until an OS-level isolation provider is configured.',
       parameters: {
         type: 'object',
         properties: {
@@ -109,7 +109,6 @@ const ConsumerToolsPlugin = {
 
         // 2. Sandbox Seam Tools
         if (ctx.has('sandbox')) {
-          tools.push(CORE_SEAM_TOOLS[0]); // run_code
         }
 
         // 3. Browser Seam Tools
@@ -152,6 +151,8 @@ const ConsumerToolsPlugin = {
        * Unified execution dispatcher that routes to the appropriate seam provider
        */
       async executeTool(toolName, toolArgs = {}, options = {}) {
+        return { success: false, denied: true, error: 'Direct harness dispatch is disabled; use the policy-enforced AgentExecutionEngine route.' };
+        /* Legacy dispatcher retained temporarily for Stage 2 migration review.
         const startTime = Date.now();
         ctx.emit('tool:invoke', { tool: toolName, args: toolArgs, timestamp: startTime });
 
@@ -183,7 +184,7 @@ const ConsumerToolsPlugin = {
               success: true,
               path: toolArgs.file_path || toolArgs.path,
               content: content.length > 10000 ? content.slice(0, 10000) + '... [truncated]' : content
-            };
+        };
           }
 
           // 2. MCP Client Tools (system_info, calculate_or_eval, search_living_memory)
@@ -256,6 +257,7 @@ const ConsumerToolsPlugin = {
           ctx.emit('tool:error', { tool: toolName, error: err.message, durationMs });
           return { success: false, error: err.message };
         }
+        */
       }
     };
 

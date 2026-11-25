@@ -40,11 +40,11 @@ class PathGuard {
     }
 
     if (Array.isArray(approvedRoots) && approvedRoots.length > 0) {
-      this.approvedRoots = approvedRoots.map(r => path.resolve(r));
+      this.approvedRoots = approvedRoots.map(r => this.canonicalizeRoot(r));
     } else if (typeof approvedRoots === 'string') {
-      this.approvedRoots = [path.resolve(approvedRoots)];
+      this.approvedRoots = [this.canonicalizeRoot(approvedRoots)];
     } else {
-      this.approvedRoots = [defaultWorkspace];
+      this.approvedRoots = [this.canonicalizeRoot(defaultWorkspace)];
     }
   }
 
@@ -53,6 +53,16 @@ class PathGuard {
    */
   get defaultRoot() {
     return this.approvedRoots[0];
+  }
+
+  canonicalizeRoot(root) {
+    const absolute = path.resolve(root);
+    return fs.existsSync(absolute) ? fs.realpathSync.native(absolute) : absolute;
+  }
+
+  isContained(candidate, root) {
+    const relative = path.relative(root, candidate);
+    return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
   }
 
   /**
@@ -73,6 +83,12 @@ class PathGuard {
       throw new Error('Security Violation: Null byte detected in path');
     }
 
+    // Detect NTFS Alternate Data Streams (e.g. file.txt:stream)
+    const strippedDrive = inputPath.trim().replace(/^['"]|['"]$/g, '').replace(/^[a-zA-Z]:/, '');
+    if (strippedDrive.includes(':')) {
+      throw new Error('Security Violation: Stream syntax detected in path');
+    }
+
     // 2. Normalize and strip surrounding quotes/whitespace
     let clean = inputPath.trim().replace(/^['"]|['"]$/g, '');
 
@@ -83,7 +99,7 @@ class PathGuard {
     }
 
     // 4. Resolve against active base root
-    const baseRoot = options.baseDir ? path.resolve(options.baseDir) : this.defaultRoot;
+    const baseRoot = options.baseDir ? this.resolveSafePath(options.baseDir) : this.defaultRoot;
     let candidate;
 
     if (path.isAbsolute(clean)) {
@@ -93,11 +109,7 @@ class PathGuard {
     }
 
     // 5. Containment Check: Verify candidate begins with one of the approved roots
-    const isContained = this.approvedRoots.some(root => {
-      const normRoot = path.normalize(root).toLowerCase();
-      const normCandidate = candidate.toLowerCase();
-      return normCandidate === normRoot || normCandidate.startsWith(normRoot + path.sep);
-    });
+    const isContained = this.approvedRoots.some(root => this.isContained(candidate, root));
 
     if (!isContained) {
       throw new Error(`Security Violation: Path "${inputPath}" traverses outside approved workspace boundaries`);
@@ -114,41 +126,38 @@ class PathGuard {
       }
     }
 
-    // 7. Symlink escape check for existing paths
-    if (fs.existsSync(candidate)) {
+    const root = this.approvedRoots.find(item => this.isContained(candidate, item));
+    if (!root) throw new Error('Security Violation: Path is outside approved workspace');
+    let existing = candidate;
+    const missing = [];
+    while (true) {
       try {
-        const canonical = fs.realpathSync(candidate);
-        const isCanonicalContained = this.approvedRoots.some(root => {
-          const normRoot = path.normalize(root).toLowerCase();
-          const normCanonical = canonical.toLowerCase();
-          return normCanonical === normRoot || normCanonical.startsWith(normRoot + path.sep);
-        });
-
-        if (!isCanonicalContained) {
-          throw new Error(`Security Violation: Symlink escapes approved workspace boundary: "${inputPath}" -> "${canonical}"`);
-        }
-        return canonical;
-      } catch (err) {
-        if (err.message.includes('Security Violation')) throw err;
-        // Fall back to normalized candidate if realpath inspection failed on valid file
-      }
-    } else if (options.allowCreate) {
-      // For paths to be created, ensure the parent directory is valid and contained
-      const parentDir = path.dirname(candidate);
-      if (fs.existsSync(parentDir)) {
-        const canonicalParent = fs.realpathSync(parentDir);
-        const isParentContained = this.approvedRoots.some(root => {
-          const normRoot = path.normalize(root).toLowerCase();
-          const normParent = canonicalParent.toLowerCase();
-          return normParent === normRoot || normParent.startsWith(normRoot + path.sep);
-        });
-        if (!isParentContained) {
-          throw new Error(`Security Violation: Target directory resolves outside approved workspace boundary`);
-        }
+        if (fs.lstatSync(existing).isSymbolicLink()) throw new Error('Security Violation: Symbolic link or junction in path');
+        break;
+      } catch (error) {
+        if (error.message.startsWith('Security Violation:')) throw error;
+        if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+        missing.unshift(path.basename(existing));
+        const parent = path.dirname(existing);
+        if (parent === existing) throw new Error('Security Violation: No existing path ancestor');
+        existing = parent;
       }
     }
+    const canonicalAncestor = fs.realpathSync.native(existing);
+    if (!this.isContained(canonicalAncestor, root)) throw new Error('Security Violation: Existing ancestor escapes approved workspace');
+    let walk = root;
+    const relativeExisting = path.relative(root, existing);
+    for (const part of relativeExisting.split(path.sep).filter(Boolean)) {
+      walk = path.join(walk, part);
+      if (fs.lstatSync(walk).isSymbolicLink()) throw new Error(`Security Violation: Symbolic link or junction in path: "${path.basename(walk)}"`);
+    }
+    const resolved = fs.existsSync(candidate) ? fs.realpathSync.native(candidate) : path.join(canonicalAncestor, ...missing);
+    if (!this.isContained(resolved, root)) throw new Error('Security Violation: Resolved path escapes approved workspace');
+    return resolved;
+  }
 
-    return candidate;
+  resolve(inputPath, options = {}) {
+    return this.resolveSafePath(inputPath, options);
   }
 
   /**
