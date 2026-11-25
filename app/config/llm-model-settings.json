@@ -38,15 +38,15 @@
       "lastBackendBinary": "llama-server.exe",
       "lastSettings": {
         "threads": 16,
-        "contextSize": 8192,
-        "gpuLayers": 14,
+        "contextSize": 4096,
+        "gpuLayers": 0,
         "cacheTypeK": "q4_0",
         "cacheTypeV": "q4_0",
-        "batchSize": 512,
+        "batchSize": 256,
         "ubatchSize": 256,
-        "flashAttn": true
+        "flashAttn": false
       },
-      "updatedAt": "2026-11-25T07:39:41.101Z"
+      "updatedAt": "2026-11-25T09:05:04.434Z"
     }
   }
 }

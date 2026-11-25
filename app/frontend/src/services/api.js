@@ -478,6 +478,7 @@ export async function streamChatWithLlm(messages, options = {}, onToken = () => 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       messages,
+      conversationId: options.conversationId,
       model: options.model || "auto",
       temperature: options.temperature,
       max_tokens: options.maxTokens,

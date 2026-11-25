@@ -7202,23 +7202,23 @@ async function planWebSearchQuery(messages) {
   }
 }
 
-async function executeAutonomousImageGen(prompt, filename = "", activeWs = null) {
+async function executeAutonomousImageGen(prompt, filename = "", activeWs = null, projectFolder = "") {
   if (!prompt || typeof prompt !== "string") return null;
   const targetDir = (activeWs && activeWs.path && fs.existsSync(activeWs.path))
     ? activeWs.path
     : path.join(__dirname, "..", "..", "app", "workspace", "abyx");
 
-  const assetsDir = path.join(targetDir, "assets");
+  const projectAssetsDir = projectFolder ? path.join(targetDir, projectFolder, "assets") : path.join(targetDir, "assets");
   const fallbackAssetsDir = path.join(__dirname, "..", "..", "app", "workspace", "abyx", "assets");
   try {
-    if (!fs.existsSync(assetsDir)) fs.mkdirSync(assetsDir, { recursive: true });
+    if (!fs.existsSync(projectAssetsDir)) fs.mkdirSync(projectAssetsDir, { recursive: true });
     if (!fs.existsSync(fallbackAssetsDir)) fs.mkdirSync(fallbackAssetsDir, { recursive: true });
   } catch (_) {}
 
   const cleanPrompt = prompt.trim();
   const safeBase = filename ? path.basename(filename).replace(/\.[^.]+$/, "") : `img_${Date.now()}`;
   const outFilename = `${safeBase}.png`;
-  const targetPath = path.join(assetsDir, outFilename);
+  const targetPath = path.join(projectAssetsDir, outFilename);
   const fallbackPath = path.join(fallbackAssetsDir, outFilename);
 
   console.log(`  [cross-model:photo] Generating image for prompt: "${cleanPrompt.slice(0, 60)}..." -> ${outFilename}`);
@@ -7313,12 +7313,21 @@ async function executeAutonomousImageGen(prompt, filename = "", activeWs = null)
         const outGlobal = path.join(OUTPUTS, outFilename);
         fs.writeFileSync(outGlobal, generatedBuffer);
       } catch (_) {}
+      // Also mirror to global workspace assets for general fallback
+      try {
+        const globalWsAssets = path.join(targetDir, "assets", outFilename);
+        if (globalWsAssets !== targetPath) {
+          fs.mkdirSync(path.dirname(globalWsAssets), { recursive: true });
+          fs.writeFileSync(globalWsAssets, generatedBuffer);
+        }
+      } catch (_) {}
 
+      const relPath = projectFolder ? `${projectFolder}/assets/${outFilename}` : `assets/${outFilename}`;
       console.log(`  [cross-model:photo] Successfully saved image to workspace: ${targetPath}`);
       return {
         type: 'image',
         filename: outFilename,
-        relativePath: `assets/${outFilename}`,
+        relativePath: relPath.replace(/\\/g, '/'),
         fullPath: targetPath,
         url: `/api/output-file?filename=${encodeURIComponent(outFilename)}`,
         prompt: cleanPrompt
@@ -7330,23 +7339,23 @@ async function executeAutonomousImageGen(prompt, filename = "", activeWs = null)
   return null;
 }
 
-async function executeAutonomousAudioGen(text, filename = "", activeWs = null) {
+async function executeAutonomousAudioGen(text, filename = "", activeWs = null, projectFolder = "") {
   if (!text || typeof text !== "string") return null;
   const targetDir = (activeWs && activeWs.path && fs.existsSync(activeWs.path))
     ? activeWs.path
     : path.join(__dirname, "..", "..", "app", "workspace", "abyx");
 
-  const audioDir = path.join(targetDir, "audio");
+  const projectAudioDir = projectFolder ? path.join(targetDir, projectFolder, "audio") : path.join(targetDir, "audio");
   const fallbackAudioDir = path.join(__dirname, "..", "..", "app", "workspace", "abyx", "audio");
   try {
-    if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
+    if (!fs.existsSync(projectAudioDir)) fs.mkdirSync(projectAudioDir, { recursive: true });
     if (!fs.existsSync(fallbackAudioDir)) fs.mkdirSync(fallbackAudioDir, { recursive: true });
   } catch (_) {}
 
   const cleanText = text.trim();
   const safeBase = filename ? path.basename(filename).replace(/\.[^.]+$/, "") : `speech_${Date.now()}`;
   const outFilename = `${safeBase}.wav`;
-  const targetPath = path.join(audioDir, outFilename);
+  const targetPath = path.join(projectAudioDir, outFilename);
   const fallbackPath = path.join(fallbackAudioDir, outFilename);
 
   console.log(`  [cross-model:audio] Generating audio for text: "${cleanText.slice(0, 50)}..." -> ${outFilename}`);
@@ -7363,11 +7372,20 @@ async function executeAutonomousAudioGen(text, filename = "", activeWs = null) {
       if (fallbackPath !== targetPath) {
         fs.writeFileSync(fallbackPath, wavBuffer);
       }
+      try {
+        const globalWsAudio = path.join(targetDir, "audio", outFilename);
+        if (globalWsAudio !== targetPath) {
+          fs.mkdirSync(path.dirname(globalWsAudio), { recursive: true });
+          fs.writeFileSync(globalWsAudio, wavBuffer);
+        }
+      } catch (_) {}
+
+      const relPath = projectFolder ? `${projectFolder}/audio/${outFilename}` : `audio/${outFilename}`;
       console.log(`  [cross-model:audio] Successfully saved audio to workspace: ${targetPath}`);
       return {
         type: 'audio',
         filename: outFilename,
-        relativePath: `audio/${outFilename}`,
+        relativePath: relPath.replace(/\\/g, '/'),
         fullPath: targetPath,
         url: `/tts-outputs/${encodeURIComponent(ttsResult.audioFile || ttsResult.filename || outFilename)}`,
         durationMs: ttsResult.durationMs || 3000,
@@ -7429,7 +7447,63 @@ function inferFilenameFromPrompt(prompt, defaultExt = 'html') {
   return `site.${defaultExt}`;
 }
 
-async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
+function getTodaysDateStr() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+const conversationProjectFolders = new Map();
+
+function extractProjectNameFromPrompt(prompt) {
+  if (!prompt || typeof prompt !== 'string') return 'abyx_project';
+
+  // 1. Explicit name patterns: "called abyx", "named my_site", "titled coffee_shop", "name is cool_app"
+  const namedMatch = prompt.match(/\b(?:called|named|titled|name\s+(?:is|as)?)\s*[:=]?\s*["']?([a-zA-Z0-9_\-]+)["']?/i);
+  if (namedMatch && namedMatch[1] && !/^(an?|the|this|my|a|it|file|named|called|new|website|app|page|site)$/i.test(namedMatch[1])) {
+    return namedMatch[1].toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  }
+
+  // 2. "website for coffee shop" or "app about weather"
+  const forMatch = prompt.match(/\b(?:website|site|app|project|landing\s*page)\s+(?:for|about|of)\s+["']?([a-zA-Z0-9_\-]+)["']?/i);
+  if (forMatch && forMatch[1] && !/^(an?|the|this|my|a|it|me|us)$/i.test(forMatch[1])) {
+    return forMatch[1].toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  }
+
+  // 3. Fallback to topic extraction
+  const inferred = inferFilenameFromPrompt(prompt, 'html');
+  if (inferred && inferred !== 'site.html') {
+    const slug = path.basename(inferred, path.extname(inferred));
+    if (slug && slug.length >= 2) return slug;
+  }
+
+  return 'abyx_project';
+}
+
+function resolveProjectFolder(prompt, conversationId = null) {
+  const dateStr = getTodaysDateStr();
+  const pLower = (prompt || '').toLowerCase();
+  const isEditPrompt = /\b(edit|update|fix|modify|change|patch|replace|refactor|add to|style|tweak|continue)\b/i.test(pLower);
+  const isNewProjectExplicit = /\b(new\s+(?:project|website|site|app)|different\s+(?:project|website|app)|create\s+another|start\s+a\s+new)\b/i.test(pLower);
+
+  // If conversation has an active folder and this isn't an explicit new project instruction, reuse it
+  if (conversationId && conversationProjectFolders.has(conversationId) && !isNewProjectExplicit) {
+    if (isEditPrompt || !/\b(create|make|build|generate|scaffold)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:website|site|app|project)\b/i.test(pLower)) {
+      return conversationProjectFolders.get(conversationId);
+    }
+  }
+
+  const projName = extractProjectNameFromPrompt(prompt);
+  const folderName = `${projName}_${dateStr}`;
+  if (conversationId) {
+    conversationProjectFolders.set(conversationId, folderName);
+  }
+  return folderName;
+}
+
+async function autoExtractAndSaveCode(text, prompt = '', activeWs = null, conversationId = null) {
   if (!text || typeof text !== 'string') return [];
   const targetDir = (activeWs && activeWs.path && fs.existsSync(activeWs.path))
     ? activeWs.path
@@ -7442,6 +7516,13 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
   const pLower = (prompt || '').toLowerCase();
   const isCreationPrompt = /\b(create|generate|write|build|make|save|scaffold|develop)\b/i.test(pLower) &&
     /\b(file|script|page|landing|website|app|component|html|css|py|js|ts|json|svg)\b/i.test(pLower);
+
+  // Resolve dedicated project folder formatted with name and today's date
+  const projectFolder = resolveProjectFolder(prompt, conversationId);
+  const projectDir = path.join(targetDir, projectFolder);
+  if (!fs.existsSync(projectDir)) {
+    try { fs.mkdirSync(projectDir, { recursive: true }); } catch (_) {}
+  }
 
   const codeBlockRegex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g;
   let match;
@@ -7458,27 +7539,19 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
 
     if (pathMatch) {
       detectedFilename = pathMatch[1].trim().replace(/^[/\\]+/, '');
-      // If the model defaulted to generic "index.html" but the user requested a specific topic,
-      // override with the inferred topic name so previous files are preserved.
-      if (detectedFilename.toLowerCase() === 'index.html' && pLower && !pLower.includes('index.html')) {
-        const inferred = inferFilenameFromPrompt(prompt, 'html');
-        if (inferred && inferred !== 'site.html') {
-          detectedFilename = inferred;
-        }
-      }
     } else if (isCreationPrompt) {
       const isHtmlApp = (lang === 'html' || code.includes('<!DOCTYPE') || code.includes('<html')) && code.length > 150;
       if (isHtmlApp) {
-        detectedFilename = inferFilenameFromPrompt(prompt, 'html');
+        detectedFilename = 'index.html';
       } else if (pLower.includes('style') && lang === 'css') {
         detectedFilename = 'styles.css';
       } else if (pLower.includes('script') && (lang === 'js' || lang === 'javascript')) {
         detectedFilename = 'script.js';
       } else if (lang === 'python' || lang === 'py') {
         const pyMatch = pLower.match(/([a-zA-Z0-9_-]+\.py)/i);
-        detectedFilename = pyMatch ? pyMatch[1] : 'script.py';
+        detectedFilename = pyMatch ? pyMatch[1] : 'main.py';
       } else if (lang === 'html') {
-        detectedFilename = inferFilenameFromPrompt(prompt, 'html');
+        detectedFilename = 'index.html';
       } else {
         const anyMatch = pLower.match(/([a-zA-Z0-9_-]+\.[a-zA-Z0-9]{2,5})/i);
         if (anyMatch) {
@@ -7498,21 +7571,22 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
 
     try {
       const isEditPrompt = /\b(edit|update|fix|modify|change|patch|replace|refactor|add to)\b/i.test(pLower);
-      let finalFilename = detectedFilename;
-      let filePath = path.join(targetDir, finalFilename);
+      let finalFilename = path.basename(detectedFilename);
+      let filePath = path.join(projectDir, finalFilename);
+
       // Overwrite protection: If file already exists and prompt is not an edit/update request,
-      // generate a versioned filename (e.g. coffee_shop_2.html) so previous files are preserved.
-      if (!isEditPrompt && fs.existsSync(filePath)) {
+      // and not the primary index.html / styles.css / script.js, generate an alt filename
+      if (!isEditPrompt && fs.existsSync(filePath) && !['index.html', 'styles.css', 'script.js'].includes(finalFilename.toLowerCase())) {
         const ext = path.extname(finalFilename);
         const base = path.basename(finalFilename, ext);
         let counter = 2;
         let altFilename = `${base}_${counter}${ext}`;
-        while (fs.existsSync(path.join(targetDir, altFilename))) {
+        while (fs.existsSync(path.join(projectDir, altFilename))) {
           counter++;
           altFilename = `${base}_${counter}${ext}`;
         }
         finalFilename = altFilename;
-        filePath = path.join(targetDir, finalFilename);
+        filePath = path.join(projectDir, finalFilename);
       }
 
       const cleanCode = code.replace(/^(?:<!--|\/\/|\/\*|#)\s*(?:path|file|filename):\s*[^\n]+\n/i, '');
@@ -7524,12 +7598,92 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
       const stats = fs.statSync(filePath);
       createdFiles.push({
         filename: path.basename(finalFilename),
-        relativePath: finalFilename.replace(/\\/g, '/'),
+        relativePath: `${projectFolder}/${finalFilename}`.replace(/\\/g, '/'),
         fullPath: filePath,
         size: stats.size,
         isHtml: finalFilename.endsWith('.html') || finalFilename.endsWith('.htm')
       });
-      console.log(`[AGENTIC WORKSPACE] File saved directly to disk: ${filePath} (${stats.size} bytes)`);
+      console.log(`[AGENTIC WORKSPACE] File saved to project folder: ${filePath} (${stats.size} bytes)`);
+
+      // Auto-scaffold project companion dependencies
+      if (finalFilename.endsWith('.html') || finalFilename.endsWith('.htm')) {
+        // 1. Companion CSS dependency
+        const cssMatches = [...cleanCode.matchAll(/<link\s+[^>]*?href=["']([^"']+\.css)["']/gi)].map(m => m[1]);
+        for (const cssRef of cssMatches) {
+          const cssBase = path.basename(cssRef);
+          const cssTarget = path.join(projectDir, cssBase);
+          if (!fs.existsSync(cssTarget) && !createdFiles.some(f => f.filename === cssBase)) {
+            const defaultCss = `/* Auto-generated companion styles for ${finalFilename} in ${projectFolder} */\n:root {\n  --primary: #45D483;\n  --primary-hover: #38bdf8;\n  --bg: #090d16;\n  --card: rgba(255, 255, 255, 0.04);\n  --border: rgba(255, 255, 255, 0.08);\n  --text: #f1f5f9;\n  --text-muted: #94a3b8;\n}\n\n* {\n  box-sizing: border-box;\n  margin: 0;\n  padding: 0;\n}\n\nbody {\n  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;\n  background: var(--bg);\n  color: var(--text);\n  line-height: 1.6;\n  padding: 24px;\n}\n\na {\n  color: var(--primary);\n  text-decoration: none;\n}\na:hover {\n  text-decoration: underline;\n}\n`;
+            try {
+              fs.writeFileSync(cssTarget, defaultCss, 'utf8');
+              const cssStats = fs.statSync(cssTarget);
+              createdFiles.push({
+                filename: cssBase,
+                relativePath: `${projectFolder}/${cssBase}`.replace(/\\/g, '/'),
+                fullPath: cssTarget,
+                size: cssStats.size,
+                isHtml: false
+              });
+              console.log(`[AGENTIC WORKSPACE] Auto-scaffolded CSS dependency: ${cssTarget}`);
+            } catch (_) {}
+          }
+        }
+
+        // 2. Companion JS dependency
+        const jsMatches = [...cleanCode.matchAll(/<script\s+[^>]*?src=["']([^"']+\.js)["']/gi)].map(m => m[1]);
+        for (const jsRef of jsMatches) {
+          const jsBase = path.basename(jsRef);
+          const jsTarget = path.join(projectDir, jsBase);
+          if (!fs.existsSync(jsTarget) && !createdFiles.some(f => f.filename === jsBase)) {
+            const defaultJs = `// Auto-generated companion script for ${finalFilename} in ${projectFolder}\ndocument.addEventListener("DOMContentLoaded", () => {\n  console.log("Abyx Project loaded: ${projectFolder}");\n});\n`;
+            try {
+              fs.writeFileSync(jsTarget, defaultJs, 'utf8');
+              const jsStats = fs.statSync(jsTarget);
+              createdFiles.push({
+                filename: jsBase,
+                relativePath: `${projectFolder}/${jsBase}`.replace(/\\/g, '/'),
+                fullPath: jsTarget,
+                size: jsStats.size,
+                isHtml: false
+              });
+              console.log(`[AGENTIC WORKSPACE] Auto-scaffolded JS dependency: ${jsTarget}`);
+            } catch (_) {}
+          }
+        }
+      }
+
+      // If Python file was generated, scaffold requirements.txt
+      if (finalFilename.endsWith('.py')) {
+        const pyDeps = new Set();
+        if (/import\s+flask|from\s+flask/i.test(cleanCode)) pyDeps.add('flask');
+        if (/import\s+fastapi|from\s+fastapi/i.test(cleanCode)) { pyDeps.add('fastapi'); pyDeps.add('uvicorn'); }
+        if (/import\s+requests/i.test(cleanCode)) pyDeps.add('requests');
+        if (/import\s+pygame/i.test(cleanCode)) pyDeps.add('pygame');
+        if (/import\s+streamlit/i.test(cleanCode)) pyDeps.add('streamlit');
+        if (/import\s+pandas/i.test(cleanCode)) pyDeps.add('pandas');
+        if (/import\s+numpy/i.test(cleanCode)) pyDeps.add('numpy');
+        if (/import\s+torch/i.test(cleanCode)) pyDeps.add('torch');
+        if (/import\s+bs4|from\s+bs4/i.test(cleanCode)) pyDeps.add('beautifulsoup4');
+        if (/dotenv/i.test(cleanCode)) pyDeps.add('python-dotenv');
+
+        if (pyDeps.size > 0) {
+          const reqPath = path.join(projectDir, 'requirements.txt');
+          if (!fs.existsSync(reqPath)) {
+            try {
+              const reqContent = Array.from(pyDeps).join('\n') + '\n';
+              fs.writeFileSync(reqPath, reqContent, 'utf8');
+              createdFiles.push({
+                filename: 'requirements.txt',
+                relativePath: `${projectFolder}/requirements.txt`.replace(/\\/g, '/'),
+                fullPath: reqPath,
+                size: Buffer.byteLength(reqContent),
+                isHtml: false
+              });
+              console.log(`[AGENTIC WORKSPACE] Auto-scaffolded requirements.txt: ${reqPath}`);
+            } catch (_) {}
+          }
+        }
+      }
     } catch (e) {
       console.warn('[AGENTIC WORKSPACE] File save error:', e.message);
     }
@@ -7542,14 +7696,8 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
     const fileCommentMatch = textTrimmed.match(/(?:<!--|\/\/|#|\/\*)\s*(?:path|filename|file|name):\s*([a-zA-Z0-9_./-]+)/i);
     if (fileCommentMatch) {
       detectedFilename = fileCommentMatch[1].trim().replace(/^[/\\]+/, '');
-      if (detectedFilename.toLowerCase() === 'index.html' && pLower && !pLower.includes('index.html')) {
-        const inferred = inferFilenameFromPrompt(prompt, 'html');
-        if (inferred && inferred !== 'site.html') {
-          detectedFilename = inferred;
-        }
-      }
     } else if (textTrimmed.includes('<!DOCTYPE html') || (textTrimmed.includes('<html') && textTrimmed.includes('</html>'))) {
-      detectedFilename = inferFilenameFromPrompt(prompt, 'html');
+      detectedFilename = 'index.html';
     }
 
     if (detectedFilename) {
@@ -7562,22 +7710,8 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
 
     if (detectedFilename) {
       try {
-        const isEditPrompt = /\b(edit|update|fix|modify|change|patch|replace|refactor|add to)\b/i.test(pLower);
-        let finalFilename = detectedFilename;
-        let filePath = path.join(targetDir, finalFilename);
-        if (!isEditPrompt && fs.existsSync(filePath)) {
-          const ext = path.extname(finalFilename);
-          const base = path.basename(finalFilename, ext);
-          let counter = 2;
-          let altFilename = `${base}_${counter}${ext}`;
-          while (fs.existsSync(path.join(targetDir, altFilename))) {
-            counter++;
-            altFilename = `${base}_${counter}${ext}`;
-          }
-          finalFilename = altFilename;
-          filePath = path.join(targetDir, finalFilename);
-        }
-
+        let finalFilename = path.basename(detectedFilename);
+        let filePath = path.join(projectDir, finalFilename);
         const cleanCode = textTrimmed.replace(/^(?:<!--|\/\/|\/\*|#)\s*(?:path|file|filename|name):\s*[^\n]+\n/i, '');
         const fileDir = path.dirname(filePath);
         if (!fs.existsSync(fileDir)) {
@@ -7587,12 +7721,12 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
         const stats = fs.statSync(filePath);
         createdFiles.push({
           filename: path.basename(finalFilename),
-          relativePath: finalFilename.replace(/\\/g, '/'),
+          relativePath: `${projectFolder}/${finalFilename}`.replace(/\\/g, '/'),
           fullPath: filePath,
           size: stats.size,
           isHtml: finalFilename.endsWith('.html') || finalFilename.endsWith('.htm')
         });
-        console.log(`[AGENTIC WORKSPACE] Unfenced file captured and saved to disk: ${filePath} (${stats.size} bytes)`);
+        console.log(`[AGENTIC WORKSPACE] Unfenced file captured and saved to project folder: ${filePath} (${stats.size} bytes)`);
       } catch (e) {
         console.warn('[AGENTIC WORKSPACE] Unfenced file save error:', e.message);
       }
@@ -7639,7 +7773,7 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
     while ((imgMatch = imgTagRegex.exec(text)) !== null) {
       const imgPrompt = imgMatch[1];
       const filename = imgMatch[2] || `image_${createdMedia.length + 1}.png`;
-      const gen = await withTimeout(executeAutonomousImageGen(imgPrompt, filename, activeWs));
+      const gen = await withTimeout(executeAutonomousImageGen(imgPrompt, filename, activeWs, projectFolder));
       if (gen) createdMedia.push(gen);
     }
 
@@ -7651,7 +7785,7 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
         const filename = htmlMatch[1] || `image_${createdMedia.length + 1}.png`;
         const imgPrompt = htmlMatch[2];
         if (imgPrompt && !createdMedia.some(m => m.filename === filename)) {
-          const gen = await withTimeout(executeAutonomousImageGen(imgPrompt, filename, activeWs));
+          const gen = await withTimeout(executeAutonomousImageGen(imgPrompt, filename, activeWs, projectFolder));
           if (gen) createdMedia.push(gen);
         }
       }
@@ -7661,7 +7795,7 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
     const isExplicitImageGenPrompt = /^(?:generate|create|make|draw|paint|render)\s+(?:an?\s+)?(?:image|photo|picture|drawing|illustration|artwork)\s+(?:of\s+)?(.+)/i.exec(pLower);
     if (isExplicitImageGenPrompt && isExplicitImageGenPrompt[1] && createdMedia.length === 0) {
       const explicitPrompt = isExplicitImageGenPrompt[1].trim();
-      const gen = await withTimeout(executeAutonomousImageGen(explicitPrompt, `image_${Date.now()}.png`, activeWs));
+      const gen = await withTimeout(executeAutonomousImageGen(explicitPrompt, `image_${Date.now()}.png`, activeWs, projectFolder));
       if (gen) createdMedia.push(gen);
     }
   }
@@ -7673,7 +7807,7 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
     while ((audioMatch = audioTagRegex.exec(text)) !== null) {
       const audioText = audioMatch[1];
       const filename = audioMatch[2] || `audio_${createdMedia.length + 1}.wav`;
-      const gen = await withTimeout(executeAutonomousAudioGen(audioText, filename, activeWs));
+      const gen = await withTimeout(executeAutonomousAudioGen(audioText, filename, activeWs, projectFolder));
       if (gen) createdMedia.push(gen);
     }
 
@@ -7682,7 +7816,7 @@ async function autoExtractAndSaveCode(text, prompt = '', activeWs = null) {
     if (isExplicitAudioGenPrompt && createdMedia.filter(m => m.type === 'audio').length === 0) {
       const candidateText = isExplicitAudioGenPrompt[1]?.trim() || text.replace(/```[\s\S]*?```/g, '').slice(0, 500).trim();
       if (candidateText && candidateText.length > 5) {
-        const gen = await withTimeout(executeAutonomousAudioGen(candidateText, `audio_${Date.now()}.wav`, activeWs));
+        const gen = await withTimeout(executeAutonomousAudioGen(candidateText, `audio_${Date.now()}.wav`, activeWs, projectFolder));
         if (gen) createdMedia.push(gen);
       }
     }
@@ -7839,7 +7973,8 @@ async function doLlmChat(req, res, body, retryCount = 0, routedModelInfo = null)
               try {
                 const lastPrompt = getLastUserQuery(rawMessages);
                 const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
-                const savedFiles = await autoExtractAndSaveCode(localResponseAccumulator, lastPrompt, activeWs);
+                const conversationId = body.conversationId || body.conversation_id || body.sessionId || body.session_id || body.id || null;
+                const savedFiles = await autoExtractAndSaveCode(localResponseAccumulator, lastPrompt, activeWs, conversationId);
                 const savedMedia = savedFiles?.media || [];
                 if (savedFiles && savedFiles.length > 0) {
                   for (const sf of savedFiles) {
@@ -8379,7 +8514,8 @@ ${skillsContext}`;
               if (cloudResponseAccumulator) {
                 try {
                   const lastPrompt = [...normalizedMessages].reverse().find(m => m.role === 'user')?.content || "";
-                  const savedFiles = await autoExtractAndSaveCode(cloudResponseAccumulator, lastPrompt, activeWs);
+                  const conversationId = body.conversationId || body.conversation_id || body.sessionId || body.session_id || body.id || null;
+                  const savedFiles = await autoExtractAndSaveCode(cloudResponseAccumulator, lastPrompt, activeWs, conversationId);
                   const savedMedia = savedFiles?.media || [];
                   if (savedFiles && savedFiles.length > 0) {
                     for (const sf of savedFiles) {
@@ -8869,12 +9005,12 @@ ${skillsContext}`;
     return;
   }
 
-  // POST /api/workspace/reveal — Reveals file in Windows Explorer / OS file manager
-  if (req.url === "/api/workspace/reveal" && req.method === "POST") {
+  // POST /api/workspace/reveal or /api/files/open — Reveals file in Windows Explorer / OS file manager
+  if ((req.url === "/api/workspace/reveal" || req.url === "/api/files/open") && req.method === "POST") {
     try {
       const body = await readJsonBody(req, res);
       if (!body) return;
-      const targetRel = String(body.path || "index.html").trim().replace(/^[/\\]+/, "");
+      const targetRel = String(body.path || body.filePath || "index.html").trim().replace(/^[/\\]+/, "");
       const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
       const wsDir = (activeWs && activeWs.path) ? activeWs.path : path.join(ROOT, "app", "workspace", "abyx");
       let fullPath = path.isAbsolute(body.path || "") ? body.path : path.join(wsDir, targetRel);
@@ -8890,6 +9026,15 @@ ${skillsContext}`;
           path.join(ROOT, "app", "workspace", "abyx", "assets", base),
           path.join(ROOT, "data", "images", base)
         ];
+        try {
+          const entries = fs.readdirSync(wsDir, { withFileTypes: true });
+          for (const ent of entries) {
+            if (ent.isDirectory()) {
+              candidates.push(path.join(wsDir, ent.name, base));
+              candidates.push(path.join(wsDir, ent.name, targetRel));
+            }
+          }
+        } catch (_) {}
         const found = candidates.find(p => fs.existsSync(p));
         if (found) fullPath = found;
       }
@@ -9031,12 +9176,51 @@ ${skillsContext}`;
 
       if (targetUrl.startsWith("local://")) {
         const localFile = targetUrl.replace(/^local:\/\//, "").split("?")[0] || "index.html";
-        const filename = path.basename(localFile);
+        const cleanRel = localFile.replace(/^[/\\]+/, "").replace(/\.\./g, "");
         const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
         const wsDir = (activeWs && activeWs.path) ? activeWs.path : path.join(ROOT, "app", "workspace", "abyx");
-        const filePath = path.join(wsDir, filename);
+        let filePath = path.join(wsDir, cleanRel);
 
-        if (fs.existsSync(filePath)) {
+        // If target points to a directory, look for index.html inside
+        if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+          const indexCandidate = path.join(filePath, "index.html");
+          if (fs.existsSync(indexCandidate)) {
+            filePath = indexCandidate;
+          }
+        }
+
+        // If not found directly, search inside project directories in wsDir
+        if (!fs.existsSync(filePath)) {
+          try {
+            const entries = fs.readdirSync(wsDir, { withFileTypes: true });
+            const subdirs = entries
+              .filter(e => e.isDirectory() && e.name !== "assets" && e.name !== "audio")
+              .map(e => ({ name: e.name, mtime: fs.statSync(path.join(wsDir, e.name)).mtimeMs }))
+              .sort((a, b) => b.mtime - a.mtime);
+
+            for (const sub of subdirs) {
+              const candidate = path.join(wsDir, sub.name, cleanRel);
+              if (fs.existsSync(candidate)) {
+                filePath = candidate;
+                break;
+              }
+              const baseCandidate = path.join(wsDir, sub.name, path.basename(cleanRel));
+              if (fs.existsSync(baseCandidate)) {
+                filePath = baseCandidate;
+                break;
+              }
+              if (cleanRel === "index.html" || cleanRel === "") {
+                const indexCand = path.join(wsDir, sub.name, "index.html");
+                if (fs.existsSync(indexCand)) {
+                  filePath = indexCand;
+                  break;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (fs.existsSync(filePath) && !fs.statSync(filePath).isDirectory()) {
           const stat = fs.statSync(filePath);
           const ext = path.extname(filePath).toLowerCase();
           const mime = MIME[ext] || "text/html; charset=utf-8";
@@ -9050,7 +9234,7 @@ ${skillsContext}`;
           return;
         }
 
-        const placeholderHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Workspace Preview</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#050505;color:#ededed;font-family:sans-serif;text-align:center;padding:20px;box-sizing:border-box;}.box{max-width:480px;border:1px solid #333;border-radius:12px;padding:32px;background:#111;}.btn{background:#38bdf8;color:#000;padding:10px 20px;border-radius:6px;border:none;cursor:pointer;font-weight:bold;margin-top:16px;}</style></head><body><div class="box"><h2>No '${filename}' found yet</h2><p style="color:#888;">Ask Abyx to generate your website or app code, and it will render live here automatically.</p></div></body></html>`;
+        const placeholderHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Workspace Preview</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#050505;color:#ededed;font-family:sans-serif;text-align:center;padding:20px;box-sizing:border-box;}.box{max-width:480px;border:1px solid #333;border-radius:12px;padding:32px;background:#111;}.btn{background:#38bdf8;color:#000;padding:10px 20px;border-radius:6px;border:none;cursor:pointer;font-weight:bold;margin-top:16px;}</style></head><body><div class="box"><h2>No '${path.basename(cleanRel)}' found yet</h2><p style="color:#888;">Ask Abyx to generate your website or app code, and it will render live here automatically.</p></div></body></html>`;
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Access-Control-Allow-Origin": "*" });
         if (req.method === "HEAD") return res.end();
         return res.end(placeholderHtml);
@@ -9156,12 +9340,12 @@ ${skillsContext}`;
     return;
   }
 
-  // POST /api/workspace/reveal — Reveals file in Windows Explorer / OS file manager
-  if (req.url === "/api/workspace/reveal" && req.method === "POST") {
+  // POST /api/workspace/reveal or /api/files/open — Reveals file in Windows Explorer / OS file manager
+  if ((req.url === "/api/workspace/reveal" || req.url === "/api/files/open") && req.method === "POST") {
     try {
       const body = await readJsonBody(req, res);
       if (!body) return;
-      const targetRel = String(body.path || "index.html").trim().replace(/^[/\\]+/, "");
+      const targetRel = String(body.path || body.filePath || "index.html").trim().replace(/^[/\\]+/, "");
       const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
       const wsDir = (activeWs && activeWs.path) ? activeWs.path : path.join(ROOT, "app", "workspace", "abyx");
       let fullPath = path.isAbsolute(body.path || "") ? body.path : path.join(wsDir, targetRel);
@@ -9177,6 +9361,15 @@ ${skillsContext}`;
           path.join(ROOT, "app", "workspace", "abyx", "assets", base),
           path.join(ROOT, "data", "images", base)
         ];
+        try {
+          const entries = fs.readdirSync(wsDir, { withFileTypes: true });
+          for (const ent of entries) {
+            if (ent.isDirectory()) {
+              candidates.push(path.join(wsDir, ent.name, base));
+              candidates.push(path.join(wsDir, ent.name, targetRel));
+            }
+          }
+        } catch (_) {}
         const found = candidates.find(p => fs.existsSync(p));
         if (found) fullPath = found;
       }
@@ -9318,12 +9511,51 @@ ${skillsContext}`;
 
       if (targetUrl.startsWith("local://")) {
         const localFile = targetUrl.replace(/^local:\/\//, "").split("?")[0] || "index.html";
-        const filename = path.basename(localFile);
+        const cleanRel = localFile.replace(/^[/\\]+/, "").replace(/\.\./g, "");
         const activeWs = workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace() : null;
         const wsDir = (activeWs && activeWs.path) ? activeWs.path : path.join(ROOT, "app", "workspace", "abyx");
-        const filePath = path.join(wsDir, filename);
+        let filePath = path.join(wsDir, cleanRel);
 
-        if (fs.existsSync(filePath)) {
+        // If target points to a directory, look for index.html inside
+        if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+          const indexCandidate = path.join(filePath, "index.html");
+          if (fs.existsSync(indexCandidate)) {
+            filePath = indexCandidate;
+          }
+        }
+
+        // If not found directly, search inside project directories in wsDir
+        if (!fs.existsSync(filePath)) {
+          try {
+            const entries = fs.readdirSync(wsDir, { withFileTypes: true });
+            const subdirs = entries
+              .filter(e => e.isDirectory() && e.name !== "assets" && e.name !== "audio")
+              .map(e => ({ name: e.name, mtime: fs.statSync(path.join(wsDir, e.name)).mtimeMs }))
+              .sort((a, b) => b.mtime - a.mtime);
+
+            for (const sub of subdirs) {
+              const candidate = path.join(wsDir, sub.name, cleanRel);
+              if (fs.existsSync(candidate)) {
+                filePath = candidate;
+                break;
+              }
+              const baseCandidate = path.join(wsDir, sub.name, path.basename(cleanRel));
+              if (fs.existsSync(baseCandidate)) {
+                filePath = baseCandidate;
+                break;
+              }
+              if (cleanRel === "index.html" || cleanRel === "") {
+                const indexCand = path.join(wsDir, sub.name, "index.html");
+                if (fs.existsSync(indexCand)) {
+                  filePath = indexCand;
+                  break;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (fs.existsSync(filePath) && !fs.statSync(filePath).isDirectory()) {
           const stat = fs.statSync(filePath);
           const ext = path.extname(filePath).toLowerCase();
           const mime = MIME[ext] || "text/html; charset=utf-8";
@@ -9337,7 +9569,7 @@ ${skillsContext}`;
           return;
         }
 
-        const placeholderHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Workspace Preview</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#050505;color:#ededed;font-family:sans-serif;text-align:center;padding:20px;box-sizing:border-box;}.box{max-width:480px;border:1px solid #333;border-radius:12px;padding:32px;background:#111;}.btn{background:#38bdf8;color:#000;padding:10px 20px;border-radius:6px;border:none;cursor:pointer;font-weight:bold;margin-top:16px;}</style></head><body><div class="box"><h2>No '${filename}' found yet</h2><p style="color:#888;">Ask Abyx to generate your website or app code, and it will render live here automatically.</p></div></body></html>`;
+        const placeholderHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Workspace Preview</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#050505;color:#ededed;font-family:sans-serif;text-align:center;padding:20px;box-sizing:border-box;}.box{max-width:480px;border:1px solid #333;border-radius:12px;padding:32px;background:#111;}.btn{background:#38bdf8;color:#000;padding:10px 20px;border-radius:6px;border:none;cursor:pointer;font-weight:bold;margin-top:16px;}</style></head><body><div class="box"><h2>No '${path.basename(cleanRel)}' found yet</h2><p style="color:#888;">Ask Abyx to generate your website or app code, and it will render live here automatically.</p></div></body></html>`;
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Access-Control-Allow-Origin": "*" });
         if (req.method === "HEAD") return res.end();
         return res.end(placeholderHtml);

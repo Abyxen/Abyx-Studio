@@ -1480,6 +1480,7 @@ function TextChat({
 
       let routedInfo = null;
       const response = await streamChatWithLlm(requestMessages, {
+        conversationId: activeConversationId,
         model: selectedModel || "auto",
         temperature: textSettings?.temperature || 0.7,
         maxTokens: effectiveMaxTokens,
@@ -1857,6 +1858,7 @@ function TextChat({
       const requestStartedAt = performance.now();
 
       const response = await streamChatWithLlm(requestMessages, {
+        conversationId: activeConversationId,
         model: selectedModel || "auto",
         temperature: textSettings?.temperature || 0.7,
         maxTokens: textSettings?.maxTokens || 8192,

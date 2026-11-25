@@ -504,13 +504,46 @@ Do not claim an action succeeded unless its tool result confirms it. Current ste
     targetUrl = targetUrl.trim();
 
     // 1. Check if previewing local workspace file (local://filename or relative filename)
-    if (targetUrl.startsWith("local://") || (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://") && (targetUrl.endsWith(".html") || targetUrl.endsWith(".htm") || targetUrl.endsWith(".txt") || targetUrl.endsWith(".md")))) {
-      const isExplicitLocal = targetUrl.startsWith("local://");
-      const filename = targetUrl.replace(/^local:\/\//, "");
+    const isLocalProtocol = targetUrl.startsWith("local://");
+    const isRelativeLocalAsset = !targetUrl.startsWith("http://") && !targetUrl.startsWith("https://") &&
+      /\.(?:html?|css|js|png|jpe?g|svg|json|txt|md|wav|mp3|webp)$/i.test(targetUrl.split("?")[0]);
+
+    if (isLocalProtocol || isRelativeLocalAsset) {
+      const isExplicitLocal = isLocalProtocol;
+      const cleanRel = targetUrl.replace(/^local:\/\//, "").split("?")[0].replace(/^[/\\]+/, "").replace(/\.\./g, "");
       const runtime = getAgentRuntime(workspaceService, profileId);
       try {
-        const safePath = runtime.pathGuard.resolveSafePath(filename);
-        if (fs.existsSync(safePath) && fs.statSync(safePath).isFile()) {
+        let safePath = null;
+        try {
+          safePath = runtime.pathGuard.resolveSafePath(cleanRel);
+        } catch (_) {}
+
+        if (!safePath || !fs.existsSync(safePath) || !fs.statSync(safePath).isFile()) {
+          const wsDir = (workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace()?.path : null) || path.join(__dirname, "..", "..", "app", "workspace", "abyx");
+          // Check inside project subdirectories in active workspace
+          try {
+            const entries = fs.readdirSync(wsDir, { withFileTypes: true });
+            const subdirs = entries
+              .filter(e => e.isDirectory() && e.name !== "assets" && e.name !== "audio")
+              .map(e => ({ name: e.name, mtime: fs.statSync(path.join(wsDir, e.name)).mtimeMs }))
+              .sort((a, b) => b.mtime - a.mtime);
+
+            for (const sub of subdirs) {
+              const candidate = path.join(wsDir, sub.name, cleanRel);
+              if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+                safePath = candidate;
+                break;
+              }
+              const baseCandidate = path.join(wsDir, sub.name, path.basename(cleanRel));
+              if (fs.existsSync(baseCandidate) && fs.statSync(baseCandidate).isFile()) {
+                safePath = baseCandidate;
+                break;
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (safePath && fs.existsSync(safePath) && fs.statSync(safePath).isFile()) {
           const content = fs.readFileSync(safePath);
           const mimeType = universalFileGenerator.getMimeType(safePath) || "text/html";
           res.writeHead(200, {
@@ -521,8 +554,9 @@ Do not claim an action succeeded unless its tool result confirms it. Current ste
           res.end(content);
           return true;
         } else if (isExplicitLocal) {
-          res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-          res.end("Local file not found in active project workspace: " + filename);
+          const placeholderHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Workspace Preview</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#050505;color:#ededed;font-family:sans-serif;text-align:center;padding:20px;box-sizing:border-box;}.box{max-width:480px;border:1px solid #333;border-radius:12px;padding:32px;background:#111;}.btn{background:#38bdf8;color:#000;padding:10px 20px;border-radius:6px;border:none;cursor:pointer;font-weight:bold;margin-top:16px;}</style></head><body><div class="box"><h2>No '${path.basename(cleanRel)}' found yet</h2><p style="color:#888;">Ask Abyx to generate your website or app code, and it will render live here automatically.</p></div></body></html>`;
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Access-Control-Allow-Origin": "*" });
+          res.end(placeholderHtml);
           return true;
         }
       } catch (err) {
