@@ -1,0 +1,5 @@
+JSON File Key Count Report
+sample_a.json: 3 keys
+sample_b.json: 5 keys
+
+Most keys: sample_b.json (5)

@@ -1,0 +1,10 @@
+{
+  "name": "abyx-challenge-a-task-manager",
+  "version": "1.0.0",
+  "description": "Challenge A: Self-contained Task Management Full-Stack Application",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --experimental-sqlite --test test/task_manager.test.js"
+  }
+}

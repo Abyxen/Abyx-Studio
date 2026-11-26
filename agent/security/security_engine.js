@@ -23,6 +23,7 @@ class SecurityEngine extends EventEmitter {
     super();
     this.workspaceRoot = options.workspaceRoot ? path.resolve(options.workspaceRoot) : process.cwd();
     this.mode = options.mode || 'build'; // 'plan' | 'build'
+    this.permissionMode = options.permissionMode || 'ask'; // 'ask' | 'approve for me' | 'turbo'
     this.auditLogDir = options.auditLogDir || path.join(this.workspaceRoot, 'app', 'data', 'audit');
     this.approvalTimeoutMs = options.approvalTimeoutMs || 180000;
     this.approvalPersistencePath = options.approvalPersistencePath || path.join(this.auditLogDir, 'approvals.json');
@@ -208,6 +209,16 @@ class SecurityEngine extends EventEmitter {
     return entry;
   }
 
+  setPermissionMode(mode) {
+    const normalized = String(mode || 'ask').toLowerCase().trim().replace(/_/g, ' ');
+    if (['ask', 'approve for me', 'turbo'].includes(normalized)) {
+      this.permissionMode = normalized;
+      this.emit('permission_mode_changed', { permissionMode: this.permissionMode });
+      return true;
+    }
+    return false;
+  }
+
   isSensitivePath(targetPath) {
     if (!targetPath || typeof targetPath !== 'string') return false;
     const normalized = targetPath.replace(/\\/g, '/');
@@ -383,7 +394,27 @@ class SecurityEngine extends EventEmitter {
       }
     }
 
-    // 6. Default tool policy evaluation
+    // 6. Sandbox Permission Mode Evaluation (ask | approve for me | turbo)
+    if (this.permissionMode === 'turbo') {
+      const decision = { allowed: true, action: 'allow', risk: 'low', turbo: true, tool, agentId, taskId };
+      this.logAudit({ ...decision, status: 'allowed_turbo_mode' });
+      return decision;
+    }
+
+    if (this.permissionMode === 'approve for me') {
+      const autoApprovedTools = [
+        'write_file', 'edit_file', 'apply_patch', 'create_directory',
+        'run_tests', 'run_build', 'lint_code', 'type_check',
+        'run_command', 'run_powershell'
+      ];
+      if (autoApprovedTools.includes(tool)) {
+        const decision = { allowed: true, action: 'allow', risk: 'low', autoApproved: true, tool, agentId, taskId };
+        this.logAudit({ ...decision, status: 'allowed_auto_approved' });
+        return decision;
+      }
+    }
+
+    // 7. Default tool policy evaluation
     const policy = this.toolPolicies[tool] || 'ask';
 
     if (policy === 'allow') {

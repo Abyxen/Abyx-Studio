@@ -8,13 +8,107 @@
 
 const http = require('node:http');
 const https = require('node:https');
+const os = require('node:os');
+const { exec } = require('node:child_process');
 const credentialStore = require('../security/credential_store');
+
+/**
+ * InferenceQueue - Hardware-Aware Serialized Execution Queue
+ * Serializes local GPU requests to prevent VRAM thrashing and CUDA context thrashing,
+ * while permitting parallel CPU tool executions.
+ */
+class InferenceQueue {
+  constructor(concurrency = 1) {
+    this.concurrency = Math.max(1, Number(concurrency) || 1);
+    this.active = 0;
+    this.queue = [];
+  }
+
+  setConcurrency(c) {
+    this.concurrency = Math.max(1, Number(c) || 1);
+    this._drain();
+  }
+
+  async run(taskFn, signal = null) {
+    if (signal?.aborted) {
+      throw new Error('Inference request aborted before execution');
+    }
+
+    return new Promise((resolve, reject) => {
+      const item = {
+        taskFn,
+        resolve,
+        reject,
+        signal,
+        enqueuedAt: Date.now()
+      };
+
+      if (signal) {
+        signal.addEventListener('abort', () => {
+          const idx = this.queue.indexOf(item);
+          if (idx !== -1) {
+            this.queue.splice(idx, 1);
+            reject(new Error('Inference request cancelled in queue'));
+          }
+        }, { once: true });
+      }
+
+      this.queue.push(item);
+      this._drain();
+    });
+  }
+
+  _drain() {
+    while (this.active < this.concurrency && this.queue.length > 0) {
+      const item = this.queue.shift();
+      if (item.signal?.aborted) {
+        item.reject(new Error('Inference request cancelled in queue'));
+        continue;
+      }
+
+      this.active++;
+      item.taskFn()
+        .then(res => {
+          this.active--;
+          item.resolve(res);
+          this._drain();
+        })
+        .catch(err => {
+          this.active--;
+          item.reject(err);
+          this._drain();
+        });
+    }
+  }
+
+  getStats() {
+    return {
+      concurrency: this.concurrency,
+      activeRequests: this.active,
+      queuedRequests: this.queue.length
+    };
+  }
+}
 
 class ModelRouter {
   constructor(options = {}) {
     this.localBaseUrl = options.localBaseUrl || 'http://127.0.0.1:10086';
     this.defaultModel = options.defaultModel || 'AbyxV2 9B.gguf';
     this.timeoutMs = options.timeoutMs || 240000; // 4 min timeout for deep reasoning
+
+    // Hardware-aware inference queues (1 serialized for RTX 5060, 4 for cloud)
+    this.localQueue = new InferenceQueue(options.localConcurrency || 1);
+    this.cloudQueue = new InferenceQueue(options.cloudConcurrency || 4);
+
+    // Cumulative token and performance tracking
+    this.tokenMetrics = {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      callsCount: 0,
+      totalDurationMs: 0
+    };
+    this._gpuMetricsCache = { data: null, timestamp: 0 };
 
     // Hardware and Inference Configuration Defaults (from Abyx harness settings)
     this.harnessSettings = {
@@ -229,108 +323,116 @@ class ModelRouter {
   }
 
   /**
-   * Execute chat completion on local llama-server
+   * Execute chat completion on local llama-server via serialized hardware queue
    */
   async _callLocalEndpoint({ model, messages, temperature, maxTokens, seed, tools, signal, onChunk }) {
-    const payload = {
-      model,
-      messages,
-      temperature,
-      max_tokens: maxTokens,
-      stream: false
-    };
+    return this.localQueue.run(() => {
+      const payload = {
+        model,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+        stream: false
+      };
 
-    if (seed !== undefined) {
-      payload.seed = seed;
-    }
-
-    if (Array.isArray(tools) && tools.length > 0) {
-      payload.tools = tools;
-    }
-
-    const payloadStr = JSON.stringify(payload);
-    const url = new URL('/v1/chat/completions', this.localBaseUrl);
-
-    return new Promise((resolve, reject) => {
-      let aborted = false;
-      const req = http.request(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(payloadStr)
-        },
-        timeout: this.timeoutMs
-      }, (res) => {
-        let rawBody = '';
-        res.on('data', chunk => {
-          rawBody += chunk;
-          if (typeof onChunk === 'function') {
-            try { onChunk(chunk.toString()); } catch (_) {}
-          }
-        });
-
-        res.on('end', () => {
-          if (aborted) return;
-          if (res.statusCode !== 200) {
-            return reject(new Error(`Local endpoint HTTP ${res.statusCode}: ${rawBody.slice(0, 300)}`));
-          }
-
-          try {
-            const parsed = JSON.parse(rawBody);
-            const choice = parsed.choices?.[0] || {};
-            const message = choice.message || {};
-
-            let content = (message.content || '').trim();
-            const reasoning = (message.reasoning_content || '').trim();
-            const toolCalls = message.tool_calls || [];
-
-            // Thinking Model Accommodation:
-            // If content is empty but reasoning is present, extract solution or JSON from reasoning
-            if (!content && reasoning) {
-              const jsonMatch = reasoning.match(/```json\s*([\s\S]*?)\s*```/) || reasoning.match(/\{[\s\S]*\}/);
-              if (jsonMatch) {
-                content = jsonMatch[1] || jsonMatch[0];
-              } else {
-                content = reasoning;
-              }
-            }
-
-            resolve({
-              content,
-              text: content,
-              reasoning,
-              tool_calls: toolCalls,
-              model: parsed.model || model,
-              finishReason: choice.finish_reason || 'stop',
-              usage: parsed.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
-            });
-          } catch (err) {
-            reject(new Error(`Failed to parse local model response: ${err.message}`));
-          }
-        });
-      });
-
-      req.on('error', (err) => {
-        if (!aborted) reject(err);
-      });
-
-      req.on('timeout', () => {
-        aborted = true;
-        req.destroy();
-        reject(new Error(`Local model request timed out after ${this.timeoutMs}ms`));
-      });
-
-      if (signal) {
-        signal.addEventListener('abort', () => {
-          aborted = true;
-          req.destroy();
-          reject(new Error('Inference aborted by client'));
-        }, { once: true });
+      if (seed !== undefined) {
+        payload.seed = seed;
       }
 
-      req.write(payloadStr);
-      req.end();
-    });
+      if (Array.isArray(tools) && tools.length > 0) {
+        payload.tools = tools;
+      }
+
+      const payloadStr = JSON.stringify(payload);
+      const url = new URL('/v1/chat/completions', this.localBaseUrl);
+
+      return new Promise((resolve, reject) => {
+        let aborted = false;
+        const req = http.request(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payloadStr)
+          },
+          timeout: this.timeoutMs
+        }, (res) => {
+          let rawBody = '';
+          res.on('data', chunk => {
+            rawBody += chunk;
+            if (typeof onChunk === 'function') {
+              try { onChunk(chunk.toString()); } catch (_) {}
+            }
+          });
+
+          res.on('end', () => {
+            if (aborted) return;
+            if (res.statusCode !== 200) {
+              return reject(new Error(`Local endpoint HTTP ${res.statusCode}: ${rawBody.slice(0, 300)}`));
+            }
+
+            try {
+              const parsed = JSON.parse(rawBody);
+              const choice = parsed.choices?.[0] || {};
+              const message = choice.message || {};
+
+              let content = (message.content || '').trim();
+              const reasoning = (message.reasoning_content || '').trim();
+              const toolCalls = message.tool_calls || [];
+
+              // Thinking Model Accommodation:
+              // If content is empty but reasoning is present, extract solution or JSON from reasoning
+              if (!content && reasoning) {
+                const jsonMatch = reasoning.match(/```json\s*([\s\S]*?)\s*```/) || reasoning.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  content = jsonMatch[1] || jsonMatch[0];
+                } else {
+                  content = reasoning;
+                }
+              }
+
+              const usage = parsed.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+              this.tokenMetrics.promptTokens += (usage.prompt_tokens || 0);
+              this.tokenMetrics.completionTokens += (usage.completion_tokens || 0);
+              this.tokenMetrics.totalTokens += (usage.total_tokens || 0);
+              this.tokenMetrics.callsCount += 1;
+
+              resolve({
+                content,
+                text: content,
+                reasoning,
+                tool_calls: toolCalls,
+                model: parsed.model || model,
+                finishReason: choice.finish_reason || 'stop',
+                usage
+              });
+            } catch (err) {
+              reject(new Error(`Failed to parse local model response: ${err.message}`));
+            }
+          });
+        });
+
+        req.on('error', (err) => {
+          if (!aborted) reject(err);
+        });
+
+        req.on('timeout', () => {
+          aborted = true;
+          req.destroy();
+          reject(new Error(`Local model request timed out after ${this.timeoutMs}ms`));
+        });
+
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            aborted = true;
+            req.destroy();
+            reject(new Error('Inference aborted by client'));
+          }, { once: true });
+        }
+
+        req.write(payloadStr);
+        req.end();
+      });
+    }, signal);
   }
 
   /**
@@ -448,6 +550,78 @@ class ModelRouter {
       req.write(payload);
       req.end();
     });
+  }
+
+  /**
+   * Return inference queue depth and active requests
+   */
+  getQueueStatus() {
+    return {
+      local: this.localQueue.getStats(),
+      cloud: this.cloudQueue.getStats()
+    };
+  }
+
+  /**
+   * Return cumulative token consumption
+   */
+  getTokenMetrics() {
+    return { ...this.tokenMetrics };
+  }
+
+  /**
+   * Profile host hardware and runtime resource consumption
+   */
+  async getHardwareMetrics() {
+    const cpus = os.cpus() || [];
+    const totalMemBytes = os.totalmem();
+    const freeMemBytes = os.freemem();
+    const usedMemBytes = totalMemBytes - freeMemBytes;
+
+    let gpuInfo = null;
+    const now = Date.now();
+    if (this._gpuMetricsCache.data && (now - this._gpuMetricsCache.timestamp < 3000)) {
+      gpuInfo = this._gpuMetricsCache.data;
+    } else {
+      gpuInfo = await new Promise((resolve) => {
+        exec('nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free,temperature.gpu,utilization.gpu --format=csv,noheader,nounits', { timeout: 2000 }, (err, stdout) => {
+          if (err || !stdout) {
+            return resolve({ available: false, name: 'N/A' });
+          }
+          const parts = stdout.trim().split(',').map(s => s.trim());
+          if (parts.length >= 4) {
+            const data = {
+              available: true,
+              name: parts[0],
+              totalVramMb: Number(parts[1]),
+              usedVramMb: Number(parts[2]),
+              freeVramMb: Number(parts[3]),
+              tempC: parts[4] ? Number(parts[4]) : null,
+              utilizationPct: parts[5] ? Number(parts[5]) : null
+            };
+            this._gpuMetricsCache = { data, timestamp: Date.now() };
+            return resolve(data);
+          }
+          resolve({ available: false, name: 'N/A' });
+        });
+      });
+    }
+
+    return {
+      cpu: {
+        model: cpus[0]?.model || 'AMD Ryzen 9 8940HX',
+        cores: cpus.length,
+        architecture: os.arch()
+      },
+      ram: {
+        totalGb: Math.round((totalMemBytes / 1024 / 1024 / 1024) * 100) / 100,
+        usedGb: Math.round((usedMemBytes / 1024 / 1024 / 1024) * 100) / 100,
+        freeGb: Math.round((freeMemBytes / 1024 / 1024 / 1024) * 100) / 100
+      },
+      gpu: gpuInfo,
+      queue: this.getQueueStatus(),
+      tokens: this.getTokenMetrics()
+    };
   }
 }
 

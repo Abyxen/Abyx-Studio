@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ABYX Task Manager</title>
+  <style>
+    body { background: #0c0d12; color: #e1e4ea; font-family: monospace; padding: 20px; }
+    .card { border: 1px solid #232734; padding: 16px; margin-bottom: 12px; border-radius: 4px; background: #13151f; }
+    input, button, select { background: #1a1d29; border: 1px solid #2d3345; color: #fff; padding: 8px; font-family: monospace; }
+    button { cursor: pointer; }
+    .badge { padding: 2px 6px; font-size: 11px; border-radius: 2px; }
+    .pending { background: #4a3800; color: #f59e0b; }
+    .completed { background: #064e3b; color: #10b981; }
+  </style>
+</head>
+<body>
+  <h1>ABYX Task Manager</h1>
+  <div class="card">
+    <input id="title" placeholder="Task title..." style="width: 250px;">
+    <input id="desc" placeholder="Description..." style="width: 300px;">
+    <select id="priority">
+      <option value="low">Low</option>
+      <option value="medium" selected>Medium</option>
+      <option value="high">High</option>
+    </select>
+    <button onclick="addTask()">Add Task</button>
+  </div>
+  <div id="taskList"></div>
+  <script>
+    async function fetchTasks() {
+      const res = await fetch('/api/tasks');
+      const data = await res.json();
+      const list = document.getElementById('taskList');
+      list.innerHTML = data.tasks.map(t => `
+        <div class="card">
+          <span class="badge ${t.status}">${t.status}</span>
+          <strong>${t.title}</strong> - ${t.description} [${t.priority}]
+        </div>
+      `).join('');
+    }
+    async function addTask() {
+      const title = document.getElementById('title').value;
+      const description = document.getElementById('desc').value;
+      const priority = document.getElementById('priority').value;
+      if (!title) return;
+      await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, description, priority })
+      });
+      document.getElementById('title').value = '';
+      document.getElementById('desc').value = '';
+      fetchTasks();
+    }
+    fetchTasks();
+  </script>
+</body>
+</html>

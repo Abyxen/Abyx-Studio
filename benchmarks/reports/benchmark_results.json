@@ -1,0 +1,200 @@
+{
+  "generatedAt": "2026-11-26T01:17:54.340Z",
+  "overallScore": 100,
+  "totalTasks": 15,
+  "passTasks": 15,
+  "partialTasks": 0,
+  "failTasks": 0,
+  "durationMs": 3376,
+  "categories": {
+    "filesystem": {
+      "total": 300,
+      "pass": 3,
+      "tasks": 3
+    },
+    "terminal": {
+      "total": 300,
+      "pass": 3,
+      "tasks": 3
+    },
+    "api_integrations": {
+      "total": 100,
+      "pass": 1,
+      "tasks": 1
+    },
+    "security": {
+      "total": 300,
+      "pass": 3,
+      "tasks": 3
+    },
+    "memory_context": {
+      "total": 100,
+      "pass": 1,
+      "tasks": 1
+    },
+    "document_creation": {
+      "total": 200,
+      "pass": 2,
+      "tasks": 2
+    },
+    "long_running_autonomous": {
+      "total": 200,
+      "pass": 2,
+      "tasks": 2
+    }
+  },
+  "tasks": [
+    {
+      "id": "filesystem_001",
+      "category": "filesystem",
+      "title": "Create a directory tree",
+      "startMs": 1795655870964,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "All required paths created.",
+      "durationMs": 2
+    },
+    {
+      "id": "filesystem_002",
+      "category": "filesystem",
+      "title": "Read and report on files",
+      "startMs": 1795655870966,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "Processed 2 files. Max: sample_b.json",
+      "durationMs": 2
+    },
+    {
+      "id": "filesystem_003",
+      "category": "filesystem",
+      "title": "Search file contents and produce a report",
+      "startMs": 1795655870968,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "Found 5 TODO/FIXME occurrences. Report saved.",
+      "durationMs": 7
+    },
+    {
+      "id": "terminal_001",
+      "category": "terminal",
+      "title": "Run a system information command",
+      "startMs": 1795655870976,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "HTTP 200, output length: 198 chars",
+      "durationMs": 1373
+    },
+    {
+      "id": "terminal_002",
+      "category": "terminal",
+      "title": "List and count files by extension",
+      "startMs": 1795655872349,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "HTTP 200. .js count reported: true",
+      "durationMs": 259
+    },
+    {
+      "id": "terminal_003",
+      "category": "terminal",
+      "title": "Run the existing test suite",
+      "startMs": 1795655872608,
+      "passes": 0,
+      "failures": 0,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "Tests run. Pass: 0, Fail: 0",
+      "durationMs": 207
+    },
+    {
+      "id": "api_001",
+      "category": "api_integrations",
+      "title": "Full API health check",
+      "startMs": 1795655872815,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "100% of endpoints healthy.",
+      "durationMs": 67
+    },
+    {
+      "id": "security_001",
+      "category": "security",
+      "title": "Path traversal blocked",
+      "startMs": 1795655872883,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "Path traversal HTTP 400. Blocked: true",
+      "durationMs": 233
+    },
+    {
+      "id": "security_002",
+      "category": "security",
+      "title": "Dangerous command blocked",
+      "startMs": 1795655873116,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "format blocked:true npm-ask:true node-v:true",
+      "durationMs": 184
+    },
+    {
+      "id": "security_003",
+      "category": "security",
+      "title": "Permission mode behavior verification",
+      "startMs": 1795655873300,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "All modes settable: true",
+      "durationMs": 4
+    },
+    {
+      "id": "memory_001",
+      "category": "memory_context",
+      "title": "Create and retrieve project memory",
+      "startMs": 1795655873304,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "Created: true (id=pm_1795655751295_7b1621). Retrieved: true",
+      "durationMs": 2
+    },
+    {
+      "id": "document_001",
+      "category": "document_creation",
+      "title": "Create a Markdown technical specification",
+      "startMs": 1795655873306,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "Auth API spec written.",
+      "durationMs": 0
+    },
+    {
+      "id": "document_003",
+      "category": "document_creation",
+      "title": "Write a technical post-mortem",
+      "startMs": 1795655873306,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "Post-mortem written.",
+      "durationMs": 1
+    },
+    {
+      "id": "autonomous_001",
+      "category": "long_running_autonomous",
+      "title": "Create a complete standalone Node.js utility",
+      "startMs": 1795655873307,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "Converter created. HTML exists: true. Valid HTML: true",
+      "durationMs": 208
+    },
+    {
+      "id": "autonomous_002",
+      "category": "long_running_autonomous",
+      "title": "Full ABYX performance profiling task",
+      "startMs": 1795655873515,
+      "score": 100,
+      "verdict": "PASS",
+      "note": "Report written. Inference latency: 822ms",
+      "durationMs": 824
+    }
+  ]
+}

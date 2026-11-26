@@ -75,6 +75,36 @@ class PolicyEngine extends EventEmitter {
 
     // Pending approval requests
     this.pendingApprovals = new Map();
+    this.permissionMode = options.permissionMode || 'ask';
+  }
+
+  setPermissionMode(mode) {
+    const normalized = String(mode || 'ask').toLowerCase().trim().replace(/_/g, ' ');
+    if (normalized === 'turbo') {
+      this.permissionMode = 'turbo';
+      for (const k of Object.keys(this.policies)) {
+        this.policies[k] = 'allow';
+      }
+      this.emit('permission_mode:change', { permissionMode: 'turbo' });
+      return true;
+    }
+    if (normalized === 'approve for me') {
+      this.permissionMode = 'approve for me';
+      for (const k of ['write_file', 'edit_file', 'apply_patch', 'create_directory', 'run_tests', 'run_build', 'run_command', 'run_powershell']) {
+        this.policies[k] = 'allow';
+      }
+      this.emit('permission_mode:change', { permissionMode: 'approve for me' });
+      return true;
+    }
+    if (normalized === 'ask') {
+      this.permissionMode = 'ask';
+      for (const k of ['write_file', 'edit_file', 'apply_patch', 'create_directory', 'run_command', 'run_powershell', 'run_wsl', 'run_tests', 'run_build']) {
+        this.policies[k] = 'ask';
+      }
+      this.emit('permission_mode:change', { permissionMode: 'ask' });
+      return true;
+    }
+    return false;
   }
 
   setMode(mode) {

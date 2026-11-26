@@ -2405,5 +2405,156 @@ export async function getOrchestratorHealth() {
   return await readJsonResponse(res, "Failed to fetch orchestrator health.");
 }
 
+// ── Security & Sandboxing API ────────────────────────────────────────────────
+
+export async function getSecurityStatus() {
+  const res = await fetch("/api/security/status");
+  return await readJsonResponse(res, "Failed to fetch security status.");
+}
+
+export async function setSecurityMode({ mode, permissionMode }) {
+  const res = await fetch("/api/security/mode", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, permissionMode })
+  });
+  return await readJsonResponse(res, "Failed to update security mode.");
+}
+
+export async function getHardwareProfile() {
+  const res = await fetch("/api/harness/hardware/profile");
+  return await readJsonResponse(res, "Failed to fetch hardware profile.");
+}
+
+export async function getSecurityWorkspaces() {
+  const res = await fetch("/api/security/workspaces");
+  return await readJsonResponse(res, "Failed to fetch security workspaces.");
+}
+
+// ── Agent Memory API ─────────────────────────────────────────────────────────
+
+export async function getAgentMemory(params = {}) {
+  const query = new URLSearchParams();
+  if (params.query) query.set("q", params.query);
+  if (params.level) query.set("level", params.level);
+  if (params.category) query.set("category", params.category);
+  if (params.projectId) query.set("projectId", params.projectId);
+  const res = await fetch(`/api/agent/memory?${query.toString()}`);
+  return await readJsonResponse(res, "Failed to fetch agent memories.");
+}
+
+export async function createAgentMemory(body = {}) {
+  const res = await fetch("/api/agent/memory", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return await readJsonResponse(res, "Failed to create agent memory.");
+}
+
+export async function reviewAgentMemory(id, body = {}) {
+  const res = await fetch(`/api/agent/memory/${encodeURIComponent(id)}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return await readJsonResponse(res, "Failed to review agent memory.");
+}
+
+export async function deleteAgentMemory(id, hard = false) {
+  const res = await fetch(`/api/agent/memory/${encodeURIComponent(id)}?hard=${hard}`, {
+    method: "DELETE",
+  });
+  return await readJsonResponse(res, "Failed to delete agent memory.");
+}
+
+// ── Agent Skills & Plugins API ───────────────────────────────────────────────
+
+export async function getAgentSkills() {
+  const res = await fetch("/api/agent/skills");
+  return await readJsonResponse(res, "Failed to fetch agent skills.");
+}
+
+export async function matchAgentSkills(goal, agentId = null) {
+  const res = await fetch("/api/agent/skills/match", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ goal, agentId }),
+  });
+  return await readJsonResponse(res, "Failed to match agent skills.");
+}
+
+export async function toggleAgentSkill(id, enabled) {
+  const res = await fetch(`/api/agent/skills/${encodeURIComponent(id)}/toggle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  return await readJsonResponse(res, "Failed to toggle agent skill.");
+}
+
+export async function approveAgentSkill(id) {
+  const res = await fetch(`/api/agent/skills/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  return await readJsonResponse(res, "Failed to approve agent skill.");
+}
+
+export async function getAgentPlugins() {
+  const res = await fetch("/api/agent/plugins");
+  return await readJsonResponse(res, "Failed to fetch agent plugins.");
+}
+
+export async function toggleAgentPlugin(id, enabled) {
+  const res = await fetch(`/api/agent/plugins/${encodeURIComponent(id)}/toggle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  return await readJsonResponse(res, "Failed to toggle agent plugin.");
+}
+
+export async function approveAgentPlugin(id) {
+  const res = await fetch(`/api/agent/plugins/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  return await readJsonResponse(res, "Failed to approve agent plugin.");
+}
+
+// ── Verification & Benchmarks API ───────────────────────────────────────────
+
+export async function runVerification(body = {}) {
+  const res = await fetch("/api/verification/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return await readJsonResponse(res, "Failed to run verification suite.");
+}
+
+export async function runReviewerAudit(body = {}) {
+  const res = await fetch("/api/verification/review", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return await readJsonResponse(res, "Failed to run reviewer audit.");
+}
+
+export async function getBenchmarkTasks() {
+  const res = await fetch("/api/benchmark/tasks");
+  return await readJsonResponse(res, "Failed to fetch benchmark tasks.");
+}
+
+export async function runBenchmarkTask(taskId) {
+  const res = await fetch(`/api/benchmark/run/${encodeURIComponent(taskId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  return await readJsonResponse(res, "Failed to run benchmark task.");
+}
+
 
 

@@ -2,7 +2,7 @@
   "run_tests::npm test:coder": {
     "allowed": true,
     "reason": "Allow all tests",
-    "approvedAt": "2026-11-26T00:40:29.871Z",
-    "expiresAt": "2026-11-27T00:40:29.871Z"
+    "approvedAt": "2026-11-26T01:16:54.781Z",
+    "expiresAt": "2026-11-27T01:16:54.781Z"
   }
 }

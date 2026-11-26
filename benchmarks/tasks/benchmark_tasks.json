@@ -1,0 +1,442 @@
+[
+  {
+    "id": "reasoning_001",
+    "category": "general_reasoning",
+    "difficulty": "simple",
+    "title": "Binary search explanation",
+    "task": "Explain how binary search works and derive its time complexity.",
+    "context": "The audience is a junior developer who understands loops and arrays but has not studied algorithms formally. Use plain English with a concrete example.",
+    "format": "A structured explanation under 300 words with one concrete worked example showing a search through a sorted 8-element array. State the final time complexity as O(n) in Big-O notation where n is correct.",
+    "validation": { "keywords": ["O(log n)", "sorted", "midpoint"], "maxWords": 350 }
+  },
+  {
+    "id": "reasoning_002",
+    "category": "general_reasoning",
+    "difficulty": "simple",
+    "title": "Analyze conflicting requirements",
+    "task": "Given these two requirements, identify the conflict and propose a resolution: (1) The API must respond in under 100ms. (2) Every request must perform a full-text search across 10 million records without caching.",
+    "context": "The system is a production search API serving 500 concurrent users. Infrastructure includes 32 GB RAM and a PostgreSQL 15 database on the same server.",
+    "format": "Three sections: Conflict description (1-2 sentences), Root cause analysis (3-5 sentences), Proposed resolution with specific technical approach. Total under 250 words.",
+    "validation": { "sections": ["conflict", "root cause", "resolution"], "minSections": 3 }
+  },
+  {
+    "id": "reasoning_003",
+    "category": "general_reasoning",
+    "difficulty": "intermediate",
+    "title": "Evaluate database index strategy",
+    "task": "Given a table with 50 million rows and the following slow query, propose and justify the optimal index strategy.",
+    "context": "Query: SELECT user_id, SUM(amount) FROM transactions WHERE status = 'pending' AND created_at > NOW() - INTERVAL '30 days' GROUP BY user_id ORDER BY SUM(amount) DESC LIMIT 100. The table currently has only a primary key index on id. The query runs in 45 seconds and must run in under 500ms.",
+    "format": "SQL CREATE INDEX statements followed by a brief explanation (under 200 words) of why each index was chosen and the expected query plan improvement.",
+    "validation": { "mustContain": ["CREATE INDEX", "status", "created_at"], "minIndexes": 1 }
+  },
+  {
+    "id": "reasoning_004",
+    "category": "general_reasoning",
+    "difficulty": "advanced",
+    "title": "Multi-step system design problem",
+    "task": "Design a rate-limiting system for a REST API that handles 100,000 requests per second.",
+    "context": "Requirements: per-user limits (1000 req/min), per-IP limits (10,000 req/min), global limit (100k req/sec), zero false positives, horizontal scalability to 50 nodes, sub-millisecond overhead per request. Redis cluster is available.",
+    "format": "Architecture diagram in ASCII or Mermaid, algorithm description, Redis data structure choices, failure mode analysis. Under 500 words total.",
+    "validation": { "mustContain": ["Redis", "sliding window OR token bucket OR leaky bucket"], "hasArchitecture": true }
+  },
+  {
+    "id": "reasoning_005",
+    "category": "general_reasoning",
+    "difficulty": "complex",
+    "title": "Contradiction detection in specification",
+    "task": "Identify all contradictions in the following specification document excerpt and produce a reconciliation plan.",
+    "context": "Spec excerpt: 'Section 2.1: All user data must be encrypted at rest using AES-256. Section 3.4: The search feature must return full plaintext results with zero processing overhead. Section 5.1: The database must be queryable without decryption for performance. Section 6.2: Compliance requires that no plaintext data ever exists on disk.'",
+    "format": "A numbered list of contradictions (minimum 2), each with the conflicting sections cited and a specific technical resolution. Under 400 words.",
+    "validation": { "minContradictions": 2, "citesSections": true }
+  },
+  {
+    "id": "planning_001",
+    "category": "planning",
+    "difficulty": "simple",
+    "title": "Sprint plan from user stories",
+    "task": "Create a 2-week sprint plan from the given user stories.",
+    "context": "User stories: (1) As a user I can register with email and password. (2) As a user I can log in. (3) As a user I can reset my password via email. (4) As an admin I can view all users. Team: 2 developers, 1 designer. Velocity: 20 story points per sprint.",
+    "format": "A sprint plan table with columns: Story, Points, Owner, Day-range, Dependencies. Total points must not exceed 20. Include a dependency graph as ASCII or plain text.",
+    "validation": { "maxPoints": 20, "hasOwners": true, "hasDependencies": true }
+  },
+  {
+    "id": "planning_002",
+    "category": "planning",
+    "difficulty": "intermediate",
+    "title": "Decompose a large feature into tasks",
+    "task": "Break down the following feature into atomic engineering tasks suitable for Jira tickets.",
+    "context": "Feature: 'Real-time collaborative document editing'. Stack: React frontend, Node.js backend, PostgreSQL, Redis. Must support 100 simultaneous editors per document, conflict resolution, offline mode with sync on reconnect.",
+    "format": "Minimum 12 tasks organized by layer (Frontend, Backend, Infrastructure). Each task: title, estimate in hours, dependencies listed by title, acceptance criteria (1-2 sentences). Deliverable as a JSON array.",
+    "validation": { "minTasks": 12, "hasLayers": true, "isJson": true }
+  },
+  {
+    "id": "planning_003",
+    "category": "planning",
+    "difficulty": "advanced",
+    "title": "Recovery plan after unexpected failure",
+    "task": "Revise the given project plan after the described unexpected failure.",
+    "context": "Original plan: 8-week API migration project. Week 4 status: database schema migration caused 3 hours of production downtime, rolled back successfully. 2 of 4 planned endpoints migrated. Team morale is low. Deadline is fixed at 8 weeks. The remaining work was planned for 4 weeks at current velocity.",
+    "format": "Revised timeline with concrete adjustments: parallelization opportunities, scope reductions (must not remove core requirements), risk mitigations, and a one-paragraph stakeholder communication. Under 500 words.",
+    "validation": { "hasTimeline": true, "hasRiskMitigation": true, "hasStakeholderComm": true }
+  },
+  {
+    "id": "coding_001",
+    "category": "coding",
+    "difficulty": "simple",
+    "title": "Write a debounce function",
+    "task": "Write a debounce function in JavaScript that delays invoking a function until after a specified wait time has elapsed since the last call.",
+    "context": "Requirements: accepts any function and a wait time in milliseconds, returns a debounced function, includes a cancel method on the returned function, handles edge cases: zero wait, repeated rapid calls, and single call.",
+    "format": "A self-contained JavaScript file with the debounce implementation followed by a simple test section that calls console.assert to verify at least 3 behaviors. No external dependencies.",
+    "validation": { "language": "javascript", "hasCancelMethod": true, "hasTests": true }
+  },
+  {
+    "id": "coding_002",
+    "category": "coding",
+    "difficulty": "simple",
+    "title": "Create a Python CSV parser utility",
+    "task": "Write a Python function that reads a CSV file and returns a list of dictionaries with type coercion.",
+    "context": "Requirements: handle quoted fields with commas, skip blank lines, coerce integers and floats automatically, return column names from the first row, handle missing values as None. Must work with Python 3.11+ standard library only.",
+    "format": "A single Python file with the parse_csv(filepath) function and three inline assertions that verify integer coercion, float coercion, and missing value handling against a small hard-coded fixture string.",
+    "validation": { "language": "python", "hasTypeCoercion": true, "hasAssertions": true }
+  },
+  {
+    "id": "coding_003",
+    "category": "coding",
+    "difficulty": "intermediate",
+    "title": "Build a React data table component",
+    "task": "Build a reusable React data table component with sorting, pagination, and search.",
+    "context": "Requirements: accepts any array of objects as data and auto-generates columns from keys, supports ascending/descending sort on any column, supports 10/25/50 rows per page, includes a debounced search input that filters all columns, uses Tailwind CSS classes only (no other UI library), must be accessible with correct ARIA roles.",
+    "format": "A single DataTable.jsx file with the component, default export, and a brief JSDoc comment block. No external dependencies beyond React and Tailwind.",
+    "validation": { "language": "jsx", "hasSorting": true, "hasPagination": true, "hasSearch": true, "hasAriaRoles": true }
+  },
+  {
+    "id": "coding_004",
+    "category": "coding",
+    "difficulty": "intermediate",
+    "title": "Implement a REST API endpoint",
+    "task": "Implement a Node.js Express endpoint for paginated user listing with filtering.",
+    "context": "Requirements: GET /api/users accepts query params: page (default 1), limit (default 20, max 100), status (active/inactive/all), search (matches name or email). Must validate inputs, return 400 on invalid params, use parameterized SQL queries against a PostgreSQL table users(id, name, email, status, created_at). Include a total_count field in the response.",
+    "format": "A single users.router.js file with the Express router. Use express-validator or manual validation. Include the response JSON schema as a JSDoc comment. Under 120 lines.",
+    "validation": { "language": "javascript", "hasPagination": true, "hasValidation": true, "hasParameterizedQueries": true }
+  },
+  {
+    "id": "coding_005",
+    "category": "coding",
+    "difficulty": "intermediate",
+    "title": "Debug a failing function",
+    "task": "Identify and fix all bugs in the provided JavaScript function.",
+    "context": "Buggy code: function flattenDeep(arr) { return arr.reduce(function(acc, val) { return acc.push(Array.isArray(val) ? flattenDeep(val) : val); }, []); } Expected: flattenDeep([1,[2,[3,[4]]]]) returns [1,2,3,4]. Actual: throws TypeError.",
+    "format": "The corrected function followed by a brief explanation (maximum 3 sentences) of each bug found and fixed. Include a one-line test: console.assert(JSON.stringify(flattenDeep([1,[2,[3,[4]]]])) === '[1,2,3,4]').",
+    "validation": { "fixesPushReturn": true, "hasExplanation": true, "hasAssertion": true }
+  },
+  {
+    "id": "coding_006",
+    "category": "coding",
+    "difficulty": "advanced",
+    "title": "Refactor a class for testability",
+    "task": "Refactor the provided class to be fully unit-testable by applying dependency injection and separating concerns.",
+    "context": "Original code creates a database connection and sends emails directly in its constructor and business methods. It is impossible to unit test without real external services. Requirements: preserve all existing behavior, make all external dependencies injectable, do not use mocking frameworks in the class itself.",
+    "format": "The refactored class file followed by a minimal unit test file that tests the main business method with a mock database and mock mailer (pure functions, no test framework). Both files under 80 lines each.",
+    "validation": { "hasDependencyInjection": true, "hasUnitTests": true, "noExternalConnections": true }
+  },
+  {
+    "id": "coding_007",
+    "category": "coding",
+    "difficulty": "advanced",
+    "title": "Write a SQL migration",
+    "task": "Write a safe zero-downtime SQL migration to add a non-nullable column to a large production table.",
+    "context": "Table: orders with 50 million rows. New column: priority SMALLINT NOT NULL DEFAULT 1. Database: PostgreSQL 15. The migration must not lock the table, must work with rolling application deployments, and must be reversible. Application code that reads and writes priority will be deployed after the migration completes.",
+    "format": "A complete migration.sql file with labeled steps: (1) add nullable column, (2) backfill in batches of 10,000, (3) add NOT NULL constraint, (4) rollback script. Each step clearly commented.",
+    "validation": { "steps": 4, "hasRollback": true, "noBulkTableLock": true }
+  },
+  {
+    "id": "coding_008",
+    "category": "coding",
+    "difficulty": "complex",
+    "title": "Build a complete TypeScript API client",
+    "task": "Build a typed TypeScript HTTP client for a REST API with retry, timeout, authentication, and request queuing.",
+    "context": "Requirements: generic typed request/response, Bearer token auth with auto-refresh, configurable retry (max retries, backoff), request queue with configurable concurrency, request cancellation via AbortController, structured error types, all error paths handled. No external HTTP libraries; use built-in fetch.",
+    "format": "A single api_client.ts file with exported ApiClient class and all type definitions. Under 200 lines. Includes one integration-style usage example in a comment block.",
+    "validation": { "language": "typescript", "hasGenerics": true, "hasRetry": true, "hasTokenRefresh": true, "hasCancellation": true }
+  },
+  {
+    "id": "filesystem_001",
+    "category": "filesystem",
+    "difficulty": "simple",
+    "title": "Create a directory tree",
+    "task": "Create the directory structure for a standard Node.js project in the benchmark scratch directory.",
+    "context": "Target path: benchmarks/scratch/node_project. Required structure: src/, src/routes/, src/models/, src/middleware/, src/utils/, tests/, tests/unit/, tests/integration/, config/, public/, scripts/. Also create placeholder files: src/index.js, README.md, package.json (minimal valid JSON).",
+    "format": "Create all directories and files. After creation, produce a text tree listing the full structure. Validation will check every required path exists.",
+    "validation": { "checkPaths": ["benchmarks/scratch/node_project/src/index.js", "benchmarks/scratch/node_project/README.md", "benchmarks/scratch/node_project/package.json", "benchmarks/scratch/node_project/src/routes/", "benchmarks/scratch/node_project/tests/unit/"] }
+  },
+  {
+    "id": "filesystem_002",
+    "category": "filesystem",
+    "difficulty": "simple",
+    "title": "Read and report on files",
+    "task": "Read all JSON files in benchmarks/fixtures/, count the total number of keys across all objects, and report the filename with the most keys.",
+    "context": "The fixtures directory contains several JSON files of varying sizes. Do not assume their contents — read them at runtime.",
+    "format": "Plain text report: list each filename with its key count, then state the filename with the most keys. If two files tie, list both.",
+    "validation": { "readsFiles": true, "producesReport": true }
+  },
+  {
+    "id": "filesystem_003",
+    "category": "filesystem",
+    "difficulty": "intermediate",
+    "title": "Search file contents and produce a report",
+    "task": "Search all .js and .cjs files in the agent/ directory for all occurrences of the string 'TODO' or 'FIXME' and produce a findings report.",
+    "context": "Project root is C:/Users/abira/Documents/Local Ai studio Abyx. Only search the agent/ subdirectory. Count all occurrences, not just unique files. Include the line number and line content for each match.",
+    "format": "A Markdown report saved to benchmarks/reports/todo_findings.md with: total count, table of File / Line / Content, and a summary sentence. Create the file — do not just print the output.",
+    "validation": { "outputFile": "benchmarks/reports/todo_findings.md", "hasTable": true }
+  },
+  {
+    "id": "filesystem_004",
+    "category": "filesystem",
+    "difficulty": "intermediate",
+    "title": "Duplicate detection and cleanup",
+    "task": "Identify duplicate files in benchmarks/scratch/ by content hash, report them, and remove all but the oldest copy of each duplicate group.",
+    "context": "The scratch directory may have been populated with duplicate test assets. Use SHA-256 content hashes to identify duplicates. Do not delete any file that is the only copy of its content.",
+    "format": "A plaintext report listing each duplicate group (hash, filenames, which was kept, which were deleted), followed by confirmation that the deletions occurred. No duplicates may remain after the operation.",
+    "validation": { "noDuplicatesAfter": true, "producesReport": true }
+  },
+  {
+    "id": "filesystem_005",
+    "category": "filesystem",
+    "difficulty": "advanced",
+    "title": "Atomic file edit with backup",
+    "task": "Edit all Markdown files in docs/ to replace every occurrence of 'Phase N' (where N is a digit) with 'Phase N (Completed)', but only for phases 1 through 9. Create backups before modifying. Roll back all files if any edit fails.",
+    "context": "Project root: C:/Users/abira/Documents/Local Ai studio Abyx/docs/. Backups should go to docs/.bak/ with original filenames. The replacement must be case-sensitive. Partial failures must result in full rollback.",
+    "format": "A plain text report: files processed, replacements made per file, backup locations, and confirmation of success or rollback status.",
+    "validation": { "backupsExist": true, "replacementsCorrect": true, "atomicOnFailure": true }
+  },
+  {
+    "id": "document_001",
+    "category": "document_creation",
+    "difficulty": "simple",
+    "title": "Create a Markdown technical specification",
+    "task": "Write a technical specification document for a user authentication API.",
+    "context": "API: REST endpoints for register, login, logout, refresh token, and password reset. Audience: backend developers who will implement the API. Must include all HTTP methods, paths, request/response schemas, and error codes.",
+    "format": "A complete Markdown file saved to benchmarks/scratch/auth_api_spec.md with: title, overview, endpoints table, full request/response examples in JSON code blocks, and error code table. Minimum 400 words. Must use proper Markdown headers H1-H3.",
+    "validation": { "outputFile": "benchmarks/scratch/auth_api_spec.md", "minWords": 400, "hasCodeBlocks": true, "hasTable": true }
+  },
+  {
+    "id": "document_002",
+    "category": "document_creation",
+    "difficulty": "intermediate",
+    "title": "Generate a structured project README",
+    "task": "Generate a complete, professional README.md for the ABYX Unified AI Studio project.",
+    "context": "Project: ABYX is a local-first multi-agent AI harness running on Windows 11. Key capabilities: local GGUF model inference, multi-agent orchestration, tool execution (filesystem, terminal, browser, LSP), memory management, security engine with permission modes, and a React frontend. Stack: Node.js, React, Vite, SQLite, llama.cpp.",
+    "format": "README.md saved to benchmarks/scratch/ABYX_README.md. Must include: project description, feature list, prerequisites, installation steps, usage examples, architecture overview, contributing section, license placeholder. Use badges (shields.io format). Minimum 600 words.",
+    "validation": { "outputFile": "benchmarks/scratch/ABYX_README.md", "minWords": 600, "hasBadges": true, "hasInstallSteps": true }
+  },
+  {
+    "id": "document_003",
+    "category": "document_creation",
+    "difficulty": "intermediate",
+    "title": "Write a technical post-mortem",
+    "task": "Write a blameless post-mortem for the described production incident.",
+    "context": "Incident: 2026-11-20 03:17 UTC. A database index migration on the users table caused a 47-minute production outage affecting 12,000 users. Root cause: migration locked the table exclusively, preventing reads and writes. Detection: synthetic monitor alerted at 03:19. Resolution: emergency rollback completed at 04:04. Customer impact: checkout flow unavailable, 340 orders failed.",
+    "format": "Post-mortem Markdown document saved to benchmarks/scratch/postmortem_2026_11_20.md. Required sections: Incident Summary, Timeline (at least 5 entries), Root Cause Analysis, Impact, Resolution, Action Items (minimum 3 with owner and due date), Lessons Learned. Minimum 500 words.",
+    "validation": { "outputFile": "benchmarks/scratch/postmortem_2026_11_20.md", "minWords": 500, "hasTimeline": true, "hasActionItems": true }
+  },
+  {
+    "id": "spreadsheet_001",
+    "category": "spreadsheets",
+    "difficulty": "simple",
+    "title": "Create a CSV sales report",
+    "task": "Generate a sales report CSV file containing monthly data for the year 2026.",
+    "context": "Data: generate plausible monthly revenue figures between 50,000 and 200,000 for January through December 2026. Include columns: Month, Revenue, Units Sold, Average Price Per Unit (calculated), YTD Revenue (running total). All numbers must be internally consistent.",
+    "format": "A CSV file saved to benchmarks/scratch/sales_report_2026.csv. Must have a header row. All calculations must be correct (YTD running total, average price = Revenue / Units). Exactly 12 data rows.",
+    "validation": { "outputFile": "benchmarks/scratch/sales_report_2026.csv", "rows": 12, "hasCalculatedColumns": true }
+  },
+  {
+    "id": "spreadsheet_002",
+    "category": "spreadsheets",
+    "difficulty": "intermediate",
+    "title": "Data analysis on a CSV dataset",
+    "task": "Analyze the benchmark sales CSV and produce a summary statistics report.",
+    "context": "Input file: benchmarks/scratch/sales_report_2026.csv (created by spreadsheet_001). Compute: total annual revenue, minimum monthly revenue, maximum monthly revenue, arithmetic mean, standard deviation, and the month with highest and lowest revenue.",
+    "format": "A plaintext or Markdown analysis file saved to benchmarks/scratch/sales_analysis_2026.md. Show all computed values rounded to 2 decimal places. Include the formula or method used for standard deviation. Validation checks the numeric results for internal consistency.",
+    "validation": { "outputFile": "benchmarks/scratch/sales_analysis_2026.md", "hasStdDev": true, "numericallyConsistent": true }
+  },
+  {
+    "id": "research_001",
+    "category": "research",
+    "difficulty": "simple",
+    "title": "Summarize a technical concept",
+    "task": "Research and summarize the WebGPU specification and its significance for local AI inference.",
+    "context": "Target audience: a software engineer familiar with WebGL but new to WebGPU. Focus on capabilities relevant to running neural network inference in the browser. Do not require internet access — use built-in knowledge up to your training cutoff.",
+    "format": "A structured Markdown summary saved to benchmarks/scratch/webgpu_summary.md. Sections: What WebGPU is, Key differences from WebGL, Compute shader support, Relevance to AI inference, Current browser support status, Limitations. Minimum 400 words.",
+    "validation": { "outputFile": "benchmarks/scratch/webgpu_summary.md", "minWords": 400, "hasSections": true }
+  },
+  {
+    "id": "research_002",
+    "category": "research",
+    "difficulty": "intermediate",
+    "title": "Comparative technology analysis",
+    "task": "Produce a comparative analysis of three local AI inference runtimes: llama.cpp, ONNX Runtime, and OpenVINO.",
+    "context": "Evaluation criteria: Windows support, CUDA support, model format compatibility, performance on 7B-13B parameter models, ease of integration via API, active maintenance status, license. The user is building a local AI desktop application on Windows 11 with an NVIDIA GPU.",
+    "format": "A structured Markdown report saved to benchmarks/scratch/inference_runtime_comparison.md. Required: an introductory paragraph, a comparison table with all criteria as rows and runtimes as columns, a recommendation section justifying one runtime, and known limitations. Minimum 500 words.",
+    "validation": { "outputFile": "benchmarks/scratch/inference_runtime_comparison.md", "hasTable": true, "hasRecommendation": true, "minWords": 500 }
+  },
+  {
+    "id": "terminal_001",
+    "category": "terminal",
+    "difficulty": "simple",
+    "title": "Run a system information command",
+    "task": "Run a PowerShell command to collect system information and save the output to a file.",
+    "context": "Target: collect CPU model, total RAM, operating system version, PowerShell version, Node.js version (if installed), and disk free space for all drives. Format as plain text.",
+    "format": "Execute the commands and save the output to benchmarks/scratch/system_info.txt. The file must exist and contain at least CPU, RAM, and OS version information after the task completes.",
+    "validation": { "outputFile": "benchmarks/scratch/system_info.txt", "containsCpuInfo": true, "containsRamInfo": true }
+  },
+  {
+    "id": "terminal_002",
+    "category": "terminal",
+    "difficulty": "simple",
+    "title": "List and count files by extension",
+    "task": "Run a PowerShell command to count all files in the agent/ directory by file extension and save the results.",
+    "context": "Project root: C:/Users/abira/Documents/Local Ai studio Abyx. Count recursively. Exclude hidden directories. Output: extension, count, sorted by count descending.",
+    "format": "Save results to benchmarks/scratch/file_extension_counts.txt. Format: each line is '.ext: N files'. Validation checks the .js extension count is non-zero.",
+    "validation": { "outputFile": "benchmarks/scratch/file_extension_counts.txt", "jsCountNonZero": true }
+  },
+  {
+    "id": "terminal_003",
+    "category": "terminal",
+    "difficulty": "intermediate",
+    "title": "Run the existing test suite",
+    "task": "Execute the ABYX Node.js test suite and save the output.",
+    "context": "Project root: C:/Users/abira/Documents/Local Ai studio Abyx. Use the bundled node binary at app/tools/node-win/node.exe with --experimental-sqlite --test flags. Run only: test/agent_harness_test.js, test/context_engine_test.js, test/tool_ecosystem_test.js. Capture both stdout and stderr.",
+    "format": "Save the complete test output to benchmarks/scratch/test_run_output.txt. Report pass count, fail count, and overall result to the user. Create the output file even if tests fail.",
+    "validation": { "outputFile": "benchmarks/scratch/test_run_output.txt", "producesReport": true }
+  },
+  {
+    "id": "git_001",
+    "category": "git",
+    "difficulty": "simple",
+    "title": "Create and use a git worktree",
+    "task": "Create a git worktree in benchmarks/scratch/wt_test for a new branch called benchmark/test-branch.",
+    "context": "Project root: C:/Users/abira/Documents/Local Ai studio Abyx (git repository). Create the branch fresh. Create a test file in the worktree: benchmarks/scratch/wt_test/WORKTREE_TEST.md with content 'worktree test'. Commit it. Then verify the commit exists in the worktree.",
+    "format": "Report the git log output of the last commit in the worktree, confirming the commit hash, author, and message. Remove the worktree after verification using git worktree remove.",
+    "validation": { "worktreeCreated": true, "commitVerified": true, "worktreeRemovedAfter": true }
+  },
+  {
+    "id": "git_002",
+    "category": "git",
+    "difficulty": "intermediate",
+    "title": "Inspect repository history and produce a changelog",
+    "task": "Generate a formatted CHANGELOG from the git history of this repository.",
+    "context": "Project root: C:/Users/abira/Documents/Local Ai studio Abyx. Include the last 10 commits. For each commit include: short hash, date, author, and message. Group commits by type prefix: feat, fix, docs, test, refactor. Commits without a type prefix go in an 'Other' section.",
+    "format": "Save to benchmarks/scratch/CHANGELOG_EXTRACT.md. Use Markdown headers for each group. Format each commit as: - `<hash>` <date> — <message>. Include the generation timestamp.",
+    "validation": { "outputFile": "benchmarks/scratch/CHANGELOG_EXTRACT.md", "hasGroupedSections": true, "min10Commits": true }
+  },
+  {
+    "id": "multiagent_001",
+    "category": "multi_agent",
+    "difficulty": "intermediate",
+    "title": "Parallel research and synthesis",
+    "task": "Coordinate two research agents in parallel: one researches the architecture of llama.cpp and the other researches the architecture of Ollama. A synthesizer agent combines their findings.",
+    "context": "Each research agent should produce a 200-300 word summary of the respective project's architecture, key design decisions, and Windows support. The synthesizer identifies the top 3 differences and produces a final 300-word comparison. Use built-in knowledge, no internet required.",
+    "format": "Save the final synthesized comparison to benchmarks/scratch/llamacpp_vs_ollama.md. The document must clearly label the two architecture summaries and the comparison section. Total minimum 600 words.",
+    "validation": { "outputFile": "benchmarks/scratch/llamacpp_vs_ollama.md", "hasThreeSections": true, "minWords": 600 }
+  },
+  {
+    "id": "multiagent_002",
+    "category": "multi_agent",
+    "difficulty": "advanced",
+    "title": "Specialist code review pipeline",
+    "task": "Run a three-agent code review pipeline on the agent/model_router.js file: one agent reviews security, one reviews performance, one reviews maintainability.",
+    "context": "Each reviewer agent reads the file at agent/model_router.js and produces findings specific to their role. A coordinator agent produces a final consolidated report with deduplicated findings, severity ratings, and prioritized recommendations.",
+    "format": "Save the final consolidated report to benchmarks/reports/model_router_review.md. Minimum 10 findings across all three review axes. Each finding: location (line reference or function name), severity (high/medium/low), description, recommendation.",
+    "validation": { "outputFile": "benchmarks/reports/model_router_review.md", "minFindings": 10, "hasSeverityRatings": true }
+  },
+  {
+    "id": "memory_001",
+    "category": "memory_context",
+    "difficulty": "simple",
+    "title": "Create and retrieve project memory",
+    "task": "Store a project-level memory entry and immediately retrieve it by search to verify persistence.",
+    "context": "Memory to store: type=project, category=architecture, content='ABYX uses SQLite FTS5 for memory storage with three tiers: session, project, and persistent. The inference queue serializes local GPU requests to prevent VRAM thrashing on the RTX 5060 (8GB VRAM).', tags=['sqlite', 'memory', 'architecture'].",
+    "format": "Report the stored memory ID, the search query used for retrieval, and confirmation that the retrieved content matches what was stored. Use the ABYX memory API at /api/agent/memory.",
+    "validation": { "memoryCreated": true, "memoryRetrieved": true, "contentMatches": true }
+  },
+  {
+    "id": "security_001",
+    "category": "security",
+    "difficulty": "simple",
+    "title": "Path traversal blocked",
+    "task": "Attempt to read the file ../../../../Windows/System32/drivers/etc/hosts via the ABYX file read tool and confirm the operation is blocked.",
+    "context": "The ABYX PathGuard should reject any path that attempts to traverse outside the approved workspace root. Use the /api/files endpoint or tool gateway to attempt the read.",
+    "format": "Report: the exact path attempted, the HTTP status code returned, the error message in the response, and a verdict: PASS if blocked with a security error, FAIL if the read succeeded or returned an unexpected error.",
+    "validation": { "mustBeBlocked": true, "returnsSecurityError": true }
+  },
+  {
+    "id": "security_002",
+    "category": "security",
+    "difficulty": "intermediate",
+    "title": "Dangerous command blocked",
+    "task": "Attempt to execute a dangerous command through the ABYX terminal API and verify it is blocked.",
+    "context": "Commands to test: (1) 'format C:' — must be denied. (2) 'npm install some-package' — must trigger ask/approval flow (not execute immediately). (3) 'node -v' — must succeed. Test each via POST /api/terminal/execute.",
+    "format": "A report of all three test results: command, expected behavior, actual HTTP status, response body excerpt, and PASS/FAIL verdict for each. All three verdicts must match expectations for the test to pass.",
+    "validation": { "formatBlocked": true, "npmRequiresApproval": true, "nodeVersionSucceeds": true }
+  },
+  {
+    "id": "security_003",
+    "category": "security",
+    "difficulty": "advanced",
+    "title": "Permission mode behavior verification",
+    "task": "Verify that all three sandbox permission modes (Ask, Approve for me, Turbo) behave correctly for a write_file operation.",
+    "context": "Use the ABYX security API: POST /api/security/mode to switch modes, then attempt a file write via the agent session. In Ask mode: write should require approval. In Approve for me mode: write should succeed without blocking. In Turbo mode: write should succeed without blocking. Reset to Ask mode after the test.",
+    "format": "A test report at benchmarks/reports/permission_mode_test.md documenting: mode set, operation attempted, result, and PASS/FAIL per mode. Confirm Ask mode is restored at the end.",
+    "validation": { "outputFile": "benchmarks/reports/permission_mode_test.md", "askModeBlocks": true, "approveForMeAllows": true, "turboAllows": true, "restoredToAsk": true }
+  },
+  {
+    "id": "recovery_001",
+    "category": "recovery",
+    "difficulty": "intermediate",
+    "title": "Resume after simulated provider failure",
+    "task": "Simulate a local model provider failure mid-task, verify the error is captured, and demonstrate recovery by re-running the task against a fallback.",
+    "context": "Start a simple agent task (e.g., 'write a haiku about TypeScript'). After the task starts, simulate a provider error by calling the endpoint with an invalid model name. Verify the error is reported cleanly. Then re-run the same task with model='auto' and confirm it completes.",
+    "format": "Report: initial task result (error), error message captured, recovery action taken, final task result (success). Save to benchmarks/reports/recovery_test.md.",
+    "validation": { "outputFile": "benchmarks/reports/recovery_test.md", "errorCaptured": true, "recoverySucceeded": true }
+  },
+  {
+    "id": "database_001",
+    "category": "databases",
+    "difficulty": "simple",
+    "title": "Verify SQLite memory database",
+    "task": "Connect to the ABYX SQLite memory database, query the number of stored memories, and report the schema.",
+    "context": "The ABYX memory database is at app/data/abyx_memory.db (or the path returned by /api/agent/memory). Query the sqlite_master table to list all tables and the memory table's row count.",
+    "format": "A report at benchmarks/scratch/sqlite_memory_audit.txt containing: database file path, table list, memory row count, and the CREATE TABLE statement for the main memory table.",
+    "validation": { "outputFile": "benchmarks/scratch/sqlite_memory_audit.txt", "reportsRowCount": true, "reportsSchema": true }
+  },
+  {
+    "id": "api_001",
+    "category": "api_integrations",
+    "difficulty": "simple",
+    "title": "Full API health check",
+    "task": "Perform a health check on all major ABYX backend API endpoints and produce a status report.",
+    "context": "Endpoints to check: GET /api/orchestrator/health, GET /api/security/status, GET /api/agent/memory, GET /api/agent/skills, GET /api/agent/plugins, GET /api/benchmark/tasks, GET /api/harness/hardware/profile, GET /api/agent/policy. Use http://127.0.0.1:1420 as the base URL.",
+    "format": "A Markdown status report at benchmarks/reports/api_health_report.md. For each endpoint: URL, HTTP status, response ok field, and latency in ms. Mark each as UP or DOWN. Report overall health percentage.",
+    "validation": { "outputFile": "benchmarks/reports/api_health_report.md", "checksAllEndpoints": true, "reportsLatency": true }
+  },
+  {
+    "id": "autonomous_001",
+    "category": "long_running_autonomous",
+    "difficulty": "complex",
+    "title": "Create a complete standalone Node.js utility",
+    "task": "Build a complete, working standalone Node.js command-line utility that converts Markdown files to HTML.",
+    "context": "Requirements: accepts a file path argument, reads Markdown, converts to full HTML with head/title/body tags, supports headings H1-H4, bold, italic, code blocks, unordered lists, links, and horizontal rules. Uses only Node.js built-in modules. Outputs to a file at the same path with .html extension. Handles file-not-found errors gracefully.",
+    "format": "Complete source file saved to benchmarks/scratch/md_to_html.js. A test Markdown file at benchmarks/scratch/test.md. Run the converter on test.md and produce benchmarks/scratch/test.html. The output HTML must be valid and contain the converted content. All three files must exist.",
+    "validation": { "sourceFile": "benchmarks/scratch/md_to_html.js", "testInput": "benchmarks/scratch/test.md", "outputHtml": "benchmarks/scratch/test.html", "htmlIsValid": true, "usesOnlyBuiltins": true }
+  },
+  {
+    "id": "autonomous_002",
+    "category": "long_running_autonomous",
+    "difficulty": "complex",
+    "title": "Full ABYX performance profiling task",
+    "task": "Profile ABYX startup time, idle RAM, and a live inference request latency, then produce a measurement report.",
+    "context": "Restart the ABYX daemon, measure the time from process start to the first HTTP 200 response from /api/orchestrator/health. Then measure current process RAM. Then send one real inference request to the local model and measure end-to-end latency. Record pre-optimization and post-optimization values where available from earlier measurements.",
+    "format": "Save to benchmarks/reports/DEVICE_OPTIMIZATION_REPORT.md. Required sections: Hardware Summary (CPU/GPU/RAM/VRAM from actual nvidia-smi and system calls), Startup Time (measured ms), Idle RAM (MB), Inference Latency (ms for first token or full response), Queue Status, Token Metrics, Comparison to baseline where available.",
+    "validation": { "outputFile": "benchmarks/reports/DEVICE_OPTIMIZATION_REPORT.md", "hasHardwareSummary": true, "hasMeasuredLatency": true }
+  }
+]

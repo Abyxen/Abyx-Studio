@@ -193,6 +193,10 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
       const concurrency = Math.min(Math.max(Number(body.concurrency) || 4, 1), 8);
       const sessionId = typeof body.sessionId === "string" ? body.sessionId : `orch_${Date.now()}`;
       const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
+      if (body.permissionMode) {
+        runtime.securityEngine?.setPermissionMode?.(body.permissionMode);
+        runtime.policyEngine?.setPermissionMode?.(body.permissionMode);
+      }
 
       const harnessOverrides = body.harnessOverrides || {
         temperature: body.temperature,
@@ -354,9 +358,43 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
     return json(res, 200, {
       ok: true,
       mode: runtime.securityEngine ? runtime.securityEngine.mode : (runtime.policyEngine ? runtime.policyEngine.mode : 'build'),
+      permissionMode: runtime.securityEngine ? runtime.securityEngine.permissionMode : (runtime.policyEngine ? runtime.policyEngine.permissionMode : 'ask'),
       sandbox: sandboxStatus,
       approvedRoots: runtime.pathGuard ? runtime.pathGuard.approvedRoots : []
     });
+  }
+
+  // POST /api/security/mode (Update execution mode and sandbox permission mode: ask, approve for me, turbo)
+  if (req.method === "POST" && pathname === "/api/security/mode") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      if (body.mode) {
+        runtime.securityEngine?.setMode?.(body.mode);
+        runtime.policyEngine?.setMode?.(body.mode);
+      }
+      if (body.permissionMode) {
+        runtime.securityEngine?.setPermissionMode?.(body.permissionMode);
+        runtime.policyEngine?.setPermissionMode?.(body.permissionMode);
+      }
+      return json(res, 200, {
+        ok: true,
+        mode: runtime.securityEngine?.mode || 'build',
+        permissionMode: runtime.securityEngine?.permissionMode || 'ask'
+      });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // GET /api/harness/hardware/profile (Hardware telemetry: CPU cores, RAM, RTX 5060 VRAM, Queue)
+  if (req.method === "GET" && pathname === "/api/harness/hardware/profile") {
+    const runtime = getAgentRuntime(workspaceService, profileId);
+    const metrics = runtime.modelRouter?.getHardwareMetrics
+      ? await runtime.modelRouter.getHardwareMetrics()
+      : { cpu: {}, ram: {}, gpu: {}, queue: {}, tokens: {} };
+    return json(res, 200, { ok: true, hardware: metrics });
   }
 
   // GET /api/security/workspaces
@@ -1331,24 +1369,64 @@ Rules:
       }
       const cwd = typeof body.cwd === "string" ? body.cwd : ".";
       const runtime = getAgentRuntime(workspaceService, profileId);
-      const authorization = runtime.policyEngine.authorizeTerminalApiRequest({
-        command: body.command, cwd, approvalId: body.approvalId || null, approved: body.approved === true
-      });
-      if (authorization.requiresApproval) return json(res, 200, { ok: false, requiresApproval: true, approvalId: authorization.approvalId, preview: authorization.preview });
-      if (!authorization.allowed) return json(res, authorization.status || 403, { ok: false, error: authorization.error });
+
+      // Verify command safety through SecurityEngine
+      if (runtime.securityEngine) {
+        const danger = runtime.securityEngine.isDangerousCommand(body.command);
+        if (danger && danger.action === "deny") {
+          return json(res, 403, { ok: false, error: `Blocked dangerous command: ${danger.reason}` });
+        }
+        if (danger && danger.action === "ask" && !body.approved) {
+          const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+          const approvalKey = runtime.securityEngine.getApprovalKey("run_command", { command: body.command, cwd }, "terminal", null);
+          runtime.securityEngine.pendingApprovals.set(requestId, {
+            requestId,
+            approvalKey,
+            details: {
+              tool: "run_command",
+              args: { command: body.command, cwd },
+              command: body.command,
+              operation: "execute",
+              risk: danger.risk,
+              reason: danger.reason
+            },
+            createdAt: new Date().toISOString(),
+            resolve: (allowed, userNote = '', persist = false) => {
+              runtime.securityEngine.pendingApprovals.delete(requestId);
+              if (allowed && persist) {
+                runtime.securityEngine.approvedCache.set(approvalKey, { allowed: true, reason: userNote || 'Persisted user approval' });
+              }
+            }
+          });
+          return json(res, 200, { ok: false, requiresApproval: true, approvalId: requestId, reason: danger.reason });
+        }
+      }
       const timeoutMs = Math.min(Math.max(Number(body.timeoutMs) || 15000, 1000), 45000);
       const clientAbort = new AbortController();
       const abortOnDisconnect = () => { if (!res.writableEnded) clientAbort.abort(new Error("Client disconnected")); };
       res.once("close", abortOnDisconnect);
-      const gatewayResult = await runtime.toolGateway.execute({
-        toolId: "execute_terminal_command",
-        args: { command: body.command, cwd, timeoutMs },
-        signal: clientAbort.signal,
-        context: { approvalId: authorization.approvalId, callId: `terminal-api-${Date.now()}` }
-      });
+      
+      let result;
+      const terminalTool = runtime.terminalTool || runtime.toolGateway?.terminalTool;
+      if (terminalTool && typeof terminalTool.runCommand === "function") {
+        const tr = await terminalTool.runCommand({
+          command: body.command,
+          cwd,
+          timeout: timeoutMs,
+          signal: clientAbort.signal
+        });
+        result = { success: tr.ok, ok: tr.ok, stdout: tr.stdout || "", stderr: tr.stderr || "", exitCode: tr.exitCode ?? 0, ...tr };
+      } else {
+        const gatewayResult = await runtime.toolGateway.execute({
+          toolId: "run_command",
+          args: { command: body.command, cwd, timeout: timeoutMs },
+          signal: clientAbort.signal,
+          context: { callId: `terminal-api-${Date.now()}` }
+        });
+        result = gatewayResult.output || { success: false, ok: false, error: gatewayResult.error };
+      }
       res.removeListener("close", abortOnDisconnect);
-      const result = gatewayResult.output || { success: false, error: gatewayResult.error };
-      return json(res, gatewayResult.success && result.success !== false ? 200 : 400, { ok: gatewayResult.success && result.success !== false, ...result });
+      return json(res, result.success !== false && result.ok !== false ? 200 : 400, result);
     } catch (err) {
       return json(res, 500, { ok: false, error: err.message });
     }
