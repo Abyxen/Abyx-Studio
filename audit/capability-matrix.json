@@ -1,0 +1,12 @@
+{
+  "runtime": { "piSdkInstalled": false, "customJsRuntime": true, "liveSessionStatus": "BROKEN" },
+  "context": { "tokenBudgeting": true, "compaction": true, "transcriptPreserved": true },
+  "filesystem": { "read": true, "write": true, "edit": true, "patch": true, "glob": true, "search": true, "rename": false, "move": false, "copy": false },
+  "terminal": { "powershell": true, "timeouts": true, "wsl2": false, "envSanitized": false },
+  "developer": { "git": true, "tests": true, "lsp": "regex_vm_fallback" },
+  "browser": { "httpNavigate": true, "playwrightInstalled": false, "interact": "simulated", "screenshots": false },
+  "documents": { "pdf": true, "zip": true, "docx": false, "xlsx": false, "pptx": false },
+  "orchestration": { "langgraphInstalled": false, "nativeDag": true, "cycleDetection": true, "multiAgentLive": true },
+  "memory": { "sqlite": true, "fts5": false, "deduplication": true, "projectIsolation": true },
+  "hardware": { "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU", "vramMiB": 8151, "localQueueConcurrency": 1, "singleModel": true }
+}

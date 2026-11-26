@@ -1,12 +1,12 @@
 {
   "llm": {
     "id": "llm",
-    "pid": 33376,
-    "ppid": 18400,
+    "pid": 16024,
+    "ppid": 28384,
     "role": "llm",
     "port": 10086,
     "binary": "llama-server.exe",
     "model": "AbyxV2 9B.gguf",
-    "startedAt": "2026-11-26T01:14:20.956Z"
+    "startedAt": "2026-11-26T08:54:06.707Z"
   }
 }

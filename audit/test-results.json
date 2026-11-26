@@ -1,0 +1,29 @@
+{
+  "regressionSuite": {
+    "suites": 11,
+    "tests": 66,
+    "passed": 66,
+    "failed": 0,
+    "durationMs": 8572
+  },
+  "benchmarkRunner": {
+    "definedTasks": 44,
+    "executedTasks": 15,
+    "passed": 15,
+    "failed": 0,
+    "overallScore": 100
+  },
+  "independentAuditTests": {
+    "runtime_live_session": { "status": "BROKEN", "error": "this.logger.recordEvent is not a function" },
+    "context_compaction": { "status": "VERIFIED", "originalMessages": 34, "constructedMessages": 6, "transcriptPreserved": true },
+    "security_env_sanitization": { "status": "BROKEN", "sandboxEnvLeakedToTerminal": true },
+    "security_path_traversal": { "status": "VERIFIED", "blocked": true },
+    "security_dangerous_cmd_turbo": { "status": "VERIFIED", "formatCBlocked": true },
+    "orchestrator_3agent_http": { "status": "VERIFIED", "statusCode": 200, "durationMs": 14775 },
+    "memory_dedup_isolation": { "status": "VERIFIED", "ftsEnabled": false },
+    "browser_interact": { "status": "BROKEN", "simulated": true },
+    "browser_screenshot": { "status": "BROKEN", "error": "Playwright browser binary not installed" },
+    "pdf_zip_generation": { "status": "VERIFIED", "pdfBytes": 42626, "zipBytes": 1041 },
+    "office_docx_xlsx_pptx": { "status": "MISSING" }
+  }
+}

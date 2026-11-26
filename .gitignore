@@ -91,4 +91,9 @@ Thumbs.db
 desktop.ini
 
 .backup_optimization/
+dist-electron/
+dist/
+app/profile/
+give_pdf_report_*/
+mmake_mem_3d_*/
 

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ABYX Unified AI Studio</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0c0d12;
+      color: #e4e6eb;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      user-select: none;
+    }
+    .box {
+      border: 1px solid #222531;
+      background: #11131a;
+      padding: 36px 48px;
+      text-align: center;
+      border-radius: 6px;
+    }
+    h1 { font-size: 18px; letter-spacing: 2px; margin-bottom: 12px; color: #f4f5f7; }
+    p { font-size: 13px; color: #8b92a5; }
+    .bar {
+      width: 240px;
+      height: 2px;
+      background: #1e2230;
+      margin: 20px auto 0;
+      overflow: hidden;
+      position: relative;
+    }
+    .bar::after {
+      content: "";
+      position: absolute;
+      left: -40%;
+      width: 40%;
+      height: 100%;
+      background: #e4e6eb;
+      animation: slide 1.2s infinite ease-in-out;
+    }
+    @keyframes slide {
+      0% { left: -40%; }
+      100% { left: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>ABYX UNIFIED AI STUDIO</h1>
+    <p>Initializing local runtime and hardware inference engine...</p>
+    <div class="bar"></div>
+  </div>
+</body>
+</html>

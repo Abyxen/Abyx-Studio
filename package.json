@@ -1,0 +1,114 @@
+{
+  "name": "abyx-unified-ai-studio",
+  "version": "1.0.0",
+  "description": "ABYX Unified AI Studio - Standalone Electron Desktop Application",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.abyx.studio",
+    "productName": "ABYX Unified AI Studio",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "abyx.ico",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "agent",
+        "to": "agent"
+      },
+      {
+        "from": "services",
+        "to": "services"
+      },
+      {
+        "from": "providers",
+        "to": "providers"
+      },
+      {
+        "from": "rag",
+        "to": "rag"
+      },
+      {
+        "from": "security",
+        "to": "security"
+      },
+      {
+        "from": "extensions",
+        "to": "extensions"
+      },
+      {
+        "from": "automations",
+        "to": "automations"
+      },
+      {
+        "from": "scripts",
+        "to": "scripts",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "db.js",
+        "to": "db.js"
+      },
+      {
+        "from": "db_migrations.js",
+        "to": "db_migrations.js"
+      },
+      {
+        "from": "data_paths.js",
+        "to": "data_paths.js"
+      },
+      {
+        "from": "abyx.ico",
+        "to": "abyx.ico"
+      },
+      {
+        "from": "app/dist",
+        "to": "app/dist"
+      },
+      {
+        "from": "app/tools/node-win",
+        "to": "app/tools/node-win"
+      },
+      {
+        "from": "app/config",
+        "to": "app/config"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "abyx.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ABYX Unified AI Studio",
+      "installerIcon": "abyx.ico",
+      "uninstallerIcon": "abyx.ico",
+      "artifactName": "ABYX-Setup-${version}.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.5.0",
+    "electron-builder": "^26.18.0"
+  }
+}
