@@ -19,7 +19,9 @@ class ContextManager {
   constructor(options = {}) {
     this.workspaceRoot = options.workspaceRoot || process.cwd();
     this.sharedMemory = options.sharedMemory || null;
+    this.memoryManager = options.memoryManager || null;
     this.skillsService = options.skillsService || null;
+    this.skillEngine = options.skillEngine || null;
     this.defaultContextLimit = options.defaultContextLimit || 8192;
     this.compactionThreshold = options.compactionThreshold || 0.75; // 75%
     this.recentMessagesCount = options.recentMessagesCount || 4;
@@ -114,7 +116,12 @@ class ContextManager {
   /**
    * Retrieves relevant skills matching user query/task keywords instead of dumping all skills
    */
-  retrieveRelevantSkills(query, allSkills = [], maxSkills = 2) {
+  retrieveRelevantSkills(query, allSkills = [], maxSkills = 2, agentId = null) {
+    if (this.skillEngine && typeof this.skillEngine.matchSkills === 'function') {
+      const matched = this.skillEngine.matchSkills(query, { agentId, limit: maxSkills });
+      if (matched.length > 0) return matched;
+    }
+
     if (!query || !Array.isArray(allSkills) || allSkills.length === 0) return [];
     const queryLower = query.toLowerCase();
     const queryWords = queryLower.split(/\W+/).filter(w => w.length > 3);
@@ -140,9 +147,26 @@ class ContextManager {
   }
 
   /**
-   * Retrieves relevant memory facts & findings from SharedMemory
+   * Retrieves relevant memory facts & findings from MemoryManager or SharedMemory
    */
-  retrieveRelevantMemories(query, maxMemories = 4) {
+  retrieveRelevantMemories(query, maxMemories = 4, projectId = null, agentId = null) {
+    if (this.memoryManager && typeof this.memoryManager.searchMemory === 'function') {
+      try {
+        const searched = this.memoryManager.searchMemory({
+          query,
+          projectId,
+          agentId,
+          limit: maxMemories
+        });
+        if (searched.length > 0) {
+          return searched.map(s => ({
+            agentId: s.agentId || 'memory',
+            text: `[${s.level.toUpperCase()} / ${s.category}] ${s.title}: ${s.content}`
+          }));
+        }
+      } catch (_) {}
+    }
+
     if (!this.sharedMemory || !query) return [];
     try {
       const searchRes = this.sharedMemory.search(query);

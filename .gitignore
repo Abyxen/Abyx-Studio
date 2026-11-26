@@ -63,6 +63,7 @@ scratch_*
 # Skills & Extensions Local Cache
 skills/
 **/skills/
+!agent/skills/
 
 # Dependencies
 node_modules/

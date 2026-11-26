@@ -25,6 +25,9 @@ const ContextManager = require('./context_manager');
 const SecurityEngine = require('./security/security_engine');
 const WorkspaceIsolation = require('./security/workspace_isolation');
 const SandboxManager = require('./security/sandbox_manager');
+const { MemoryManager, SessionMemory } = require('./memory/memory_manager');
+const SkillEngine = require('./skills/skill_engine');
+const PluginManager = require('./plugins/plugin_manager');
 
 /**
  * createAgentEngine - Master Factory Function for ABYX Agent Subsystem
@@ -106,6 +109,22 @@ function createAgentEngine(options = {}) {
     }
   });
 
+  // Memory, Skills & Plugin Subsystems (Phase 8)
+  const memoryManager = options.memoryManager || new MemoryManager({
+    workspaceRoot,
+    dbPath: options.dbPath
+  });
+
+  const skillEngine = options.skillEngine || new SkillEngine({
+    workspaceRoot,
+    availableTools: Array.from(toolGateway.toolRegistry?.tools?.keys() || [])
+  });
+
+  const pluginManager = options.pluginManager || new PluginManager({
+    workspaceRoot,
+    toolGateway
+  });
+
   return {
     workspaceRoot,
     pathGuard,
@@ -119,6 +138,9 @@ function createAgentEngine(options = {}) {
     sessionManager,
     runtimeController,
     contextManager: runtimeController.contextManager,
+    memoryManager,
+    skillEngine,
+    pluginManager,
     providerRegistry,
     modelAdapter,
     cancellationManager,
@@ -155,5 +177,9 @@ module.exports = {
   ContextManager,
   SecurityEngine,
   WorkspaceIsolation,
-  SandboxManager
+  SandboxManager,
+  MemoryManager,
+  SessionMemory,
+  SkillEngine,
+  PluginManager
 };

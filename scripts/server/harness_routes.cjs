@@ -371,6 +371,213 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
     });
   }
 
+  // ==========================================
+  // MEMORY SYSTEM (PHASE 8)
+  // ==========================================
+
+  // GET /api/agent/memory
+  if (req.method === "GET" && pathname === "/api/agent/memory") {
+    const runtime = getAgentRuntime(workspaceService, profileId);
+    const query = parsedUrl.searchParams.get("q") || "";
+    const level = parsedUrl.searchParams.get("level") || "all";
+    const category = parsedUrl.searchParams.get("category") || null;
+    const projectId = parsedUrl.searchParams.get("projectId") || null;
+
+    if (runtime.memoryManager) {
+      const results = runtime.memoryManager.searchMemory({
+        query,
+        level,
+        category,
+        projectId,
+        limit: 50
+      });
+      const stats = runtime.memoryManager.getStats(projectId);
+      return json(res, 200, { ok: true, memories: results, stats });
+    }
+    return json(res, 200, { ok: true, memories: [] });
+  }
+
+  // POST /api/agent/memory
+  if (req.method === "POST" && pathname === "/api/agent/memory") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      if (runtime.memoryManager) {
+        const result = runtime.memoryManager.createMemory(body);
+        return json(res, 200, result);
+      }
+      return json(res, 500, { ok: false, error: "Memory manager unavailable" });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // POST /api/agent/memory/:id/review
+  if (req.method === "POST" && pathname.startsWith("/api/agent/memory/") && pathname.endsWith("/review")) {
+    try {
+      const parts = pathname.split("/");
+      const memoryId = parts[parts.length - 2];
+      const body = await readJsonBody(req, res);
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      if (runtime.memoryManager) {
+        const result = runtime.memoryManager.reviewMemory(memoryId, body || {});
+        return json(res, 200, result);
+      }
+      return json(res, 500, { ok: false, error: "Memory manager unavailable" });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // DELETE /api/agent/memory/:id
+  if (req.method === "DELETE" && pathname.startsWith("/api/agent/memory/")) {
+    try {
+      const memoryId = pathname.replace("/api/agent/memory/", "").trim();
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      if (runtime.memoryManager) {
+        const result = runtime.memoryManager.deleteMemory(memoryId, { hard: parsedUrl.searchParams.get("hard") === "true" });
+        return json(res, 200, result);
+      }
+      return json(res, 500, { ok: false, error: "Memory manager unavailable" });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // ==========================================
+  // SKILLS SYSTEM (PHASE 8)
+  // ==========================================
+
+  // GET /api/agent/skills
+  if (req.method === "GET" && pathname === "/api/agent/skills") {
+    const runtime = getAgentRuntime(workspaceService, profileId);
+    if (runtime.skillEngine) {
+      const skills = runtime.skillEngine.listSkills();
+      return json(res, 200, { ok: true, skills });
+    }
+    return json(res, 200, { ok: true, skills: [] });
+  }
+
+  // POST /api/agent/skills/match
+  if (req.method === "POST" && pathname === "/api/agent/skills/match") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body) return true;
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      if (runtime.skillEngine) {
+        const matched = runtime.skillEngine.matchSkills(body.goal || body.query, {
+          agentId: body.agentId,
+          limit: body.limit || 3
+        });
+        return json(res, 200, { ok: true, matched });
+      }
+      return json(res, 200, { ok: true, matched: [] });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // POST /api/agent/skills/:id/toggle
+  if (req.method === "POST" && pathname.startsWith("/api/agent/skills/") && pathname.endsWith("/toggle")) {
+    try {
+      const parts = pathname.split("/");
+      const skillId = parts[parts.length - 2];
+      const body = await readJsonBody(req, res);
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      if (runtime.skillEngine) {
+        const result = runtime.skillEngine.setSkillEnabled(skillId, body?.enabled !== false);
+        return json(res, 200, result);
+      }
+      return json(res, 500, { ok: false, error: "Skill engine unavailable" });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // POST /api/agent/skills/:id/approve
+  if (req.method === "POST" && pathname.startsWith("/api/agent/skills/") && pathname.endsWith("/approve")) {
+    try {
+      const parts = pathname.split("/");
+      const skillId = parts[parts.length - 2];
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      if (runtime.skillEngine) {
+        const result = runtime.skillEngine.approveSkill(skillId, { approvedBy: "user" });
+        return json(res, 200, result);
+      }
+      return json(res, 500, { ok: false, error: "Skill engine unavailable" });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // POST /api/agent/skills/install
+  if (req.method === "POST" && pathname === "/api/agent/skills/install") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body || !body.markdown) return json(res, 400, { ok: false, error: "Missing markdown content" });
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      if (runtime.skillEngine) {
+        const result = runtime.skillEngine.installSkill(body.markdown, {
+          scope: body.scope || "project",
+          fileName: body.fileName,
+          trusted: body.trusted === true
+        });
+        return json(res, 200, result);
+      }
+      return json(res, 500, { ok: false, error: "Skill engine unavailable" });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // ==========================================
+  // PLUGINS & EXTENSIONS (PHASE 8)
+  // ==========================================
+
+  // GET /api/agent/plugins
+  if (req.method === "GET" && pathname === "/api/agent/plugins") {
+    const runtime = getAgentRuntime(workspaceService, profileId);
+    if (runtime.pluginManager) {
+      const plugins = runtime.pluginManager.listPlugins();
+      return json(res, 200, { ok: true, plugins });
+    }
+    return json(res, 200, { ok: true, plugins: [] });
+  }
+
+  // POST /api/agent/plugins/:id/toggle
+  if (req.method === "POST" && pathname.startsWith("/api/agent/plugins/") && pathname.endsWith("/toggle")) {
+    try {
+      const parts = pathname.split("/");
+      const pluginId = parts[parts.length - 2];
+      const body = await readJsonBody(req, res);
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      if (runtime.pluginManager) {
+        const result = runtime.pluginManager.setPluginEnabled(pluginId, body?.enabled !== false);
+        return json(res, 200, result);
+      }
+      return json(res, 500, { ok: false, error: "Plugin manager unavailable" });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  // POST /api/agent/plugins/:id/approve
+  if (req.method === "POST" && pathname.startsWith("/api/agent/plugins/") && pathname.endsWith("/approve")) {
+    try {
+      const parts = pathname.split("/");
+      const pluginId = parts[parts.length - 2];
+      const runtime = getAgentRuntime(workspaceService, profileId);
+      if (runtime.pluginManager) {
+        const result = runtime.pluginManager.approvePlugin(pluginId, { approvedBy: "user" });
+        return json(res, 200, result);
+      }
+      return json(res, 500, { ok: false, error: "Plugin manager unavailable" });
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
   if (req.method === "GET" && pathname === "/api/agent/tools") {
     const runtime = getAgentRuntime(workspaceService, profileId);
     mcpClient.registerConnectedTools(runtime.toolRegistry, profileId);
