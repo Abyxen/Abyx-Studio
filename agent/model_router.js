@@ -97,6 +97,32 @@ class ModelRouter {
   }
 
   /**
+   * OpenAI / Ollama compatible chat completion interface
+   */
+  async chat(params = {}) {
+    const res = await this.generateResponse(params);
+    return {
+      id: `chat_${Date.now()}`,
+      model: res.model || params.model || 'AbyxV2',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: res.content || res.text || '',
+            reasoning_content: res.reasoning || '',
+            tool_calls: res.tool_calls || []
+          },
+          finish_reason: res.finishReason || 'stop'
+        }
+      ],
+      usage: res.usage,
+      durationMs: res.durationMs,
+      provider: res.provider
+    };
+  }
+
+  /**
    * Unified generation method matching aiProviders contract
    * @param {object} params
    * @param {string} [params.model]

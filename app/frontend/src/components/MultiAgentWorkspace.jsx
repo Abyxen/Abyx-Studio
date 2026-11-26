@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import {
   getSpecializedAgents, registerCustomAgent, streamOrchestration, cancelOrchestration,
+  recoverOrchestration,
   getOrchestratorHistory, getOrchestratorHealth, getOrchestratorSettings, updateOrchestratorSettings,
   getHardwareSpecs, listHarnessWorkspaceFiles
 } from "../services/api";
@@ -249,6 +250,22 @@ export default function MultiAgentWorkspace({ activeProject, onOpenFile }) {
     setIsOrchestrating(false);
   };
 
+  const handleRecover = async (e, runId) => {
+    e.stopPropagation();
+    setIsOrchestrating(true);
+    try {
+      const res = await recoverOrchestration(runId);
+      if (res?.ok) {
+        if (Array.isArray(res.tasks)) setTasks(res.tasks);
+        loadHistory();
+      }
+    } catch (err) {
+      setEvents(prev => [...prev, { type: "error", data: { error: err.message }, timestamp: new Date().toLocaleTimeString() }]);
+    } finally {
+      setIsOrchestrating(false);
+    }
+  };
+
   const handleInsertAgent = (role) => {
     setGoal(prev => `${prev} @${role} `);
     inputRef.current?.focus();
@@ -345,6 +362,15 @@ export default function MultiAgentWorkspace({ activeProject, onOpenFile }) {
                   <span>•</span>
                   <span>{run.durationMs ? `${Math.round(run.durationMs / 1000)}s` : "live"}</span>
                 </div>
+                {run.status !== "completed" && (
+                  <button
+                    onClick={(e) => handleRecover(e, run.runId)}
+                    disabled={isOrchestrating}
+                    className="mt-1.5 w-full py-1 px-2 rounded bg-cyan-950/50 hover:bg-cyan-900/60 border border-cyan-800/60 text-cyan-300 text-[10px] font-mono flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Recover &amp; Resume
+                  </button>
+                )}
               </div>
             ))
           )}
@@ -420,25 +446,58 @@ export default function MultiAgentWorkspace({ activeProject, onOpenFile }) {
               <div className="w-12 h-12 rounded-lg bg-white/[0.03] border border-white/[0.08] flex items-center justify-center mb-3">
                 <Cpu className="w-6 h-6 text-neutral-300" />
               </div>
-              <h3 className="text-sm font-semibold text-white mb-1">OpenCode Multi-Agent Studio</h3>
-              <p className="text-xs text-neutral-400 max-w-md mb-4 font-sans">
-                Autonomous multi-agent DAG scheduling with specialized agents, file isolation, LSP pre-flight verification, and persistent shared memory.
+              <h3 className="text-sm font-semibold text-white mb-1">OpenCode Multi-Agent Studio — Subsystems Operational</h3>
+              <p className="text-xs text-neutral-300 max-w-lg mb-3 font-sans leading-relaxed">
+                Rebuilt with OpenCode 3-pane architecture, Pi session lifecycle &amp; context compaction, LangGraph durable StateGraph orchestration, and audited tool gateway with git snapshots.
               </p>
-              <div className="flex flex-wrap items-center justify-center gap-2 max-w-lg">
-                {[
-                  "Analyze project architecture and generate docs",
-                  "Design an authentication module with JWT",
-                  "Run unit tests, inspect failures, and fix bugs",
-                  "Refactor file services with strict LSP type checks"
-                ].map((sample, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setGoal(sample)}
-                    className="px-3 py-1.5 rounded bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] text-neutral-300 text-[11px] transition-colors"
-                  >
-                    {sample}
-                  </button>
-                ))}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-w-xl text-left my-3 font-mono text-[10px]">
+                <div className="p-2 bg-white/[0.02] border border-emerald-500/30 rounded">
+                  <div className="text-emerald-400 font-semibold mb-0.5">Context &amp; Compaction</div>
+                  <div className="text-neutral-400">Active • Pi Lifecycle Loop</div>
+                </div>
+                <div className="p-2 bg-white/[0.02] border border-emerald-500/30 rounded">
+                  <div className="text-emerald-400 font-semibold mb-0.5">Shared Memory</div>
+                  <div className="text-neutral-400">Active • Findings &amp; Blackboard</div>
+                </div>
+                <div className="p-2 bg-white/[0.02] border border-emerald-500/30 rounded">
+                  <div className="text-emerald-400 font-semibold mb-0.5">Tools Gateway</div>
+                  <div className="text-neutral-400">Active • FS, Terminal, LSP, Web</div>
+                </div>
+                <div className="p-2 bg-white/[0.02] border border-emerald-500/30 rounded">
+                  <div className="text-emerald-400 font-semibold mb-0.5">Git Snapshots</div>
+                  <div className="text-neutral-400">Active • Atomic Pre-Write Stash</div>
+                </div>
+                <div className="p-2 bg-white/[0.02] border border-emerald-500/30 rounded">
+                  <div className="text-emerald-400 font-semibold mb-0.5">Policy &amp; Boundaries</div>
+                  <div className="text-neutral-400">Active • PathGuard &amp; Plan/Build</div>
+                </div>
+                <div className="p-2 bg-white/[0.02] border border-emerald-500/30 rounded">
+                  <div className="text-emerald-400 font-semibold mb-0.5">Agent Loops &amp; DAG</div>
+                  <div className="text-neutral-400">Active • 12 Specialized Personas</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center max-w-xl mt-2 font-mono text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setGoal("Analyze project architecture and suggest modular refactoring improvements")}
+                  className="px-2.5 py-1.5 bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.08] text-neutral-300 rounded transition-colors text-left"
+                >
+                  Architecture Analysis
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGoal("Audit codebase security: check path traversal, command injection, and input sanitization")}
+                  className="px-2.5 py-1.5 bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.08] text-neutral-300 rounded transition-colors text-left"
+                >
+                  Security Audit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGoal("Perform code diagnostics and generate comprehensive unit tests")}
+                  className="px-2.5 py-1.5 bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.08] text-neutral-300 rounded transition-colors text-left"
+                >
+                  Code Diagnostics &amp; Tests
+                </button>
               </div>
             </div>
           ) : (

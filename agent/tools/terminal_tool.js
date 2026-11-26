@@ -1,143 +1,154 @@
-const { spawn, spawnSync } = require('node:child_process');
-const fs = require('node:fs');
+'use strict';
 
-class ControlledTerminalTool {
+const { exec, spawn } = require('node:child_process');
+
+/**
+ * TerminalTool - Hardened Terminal Execution Subsystem
+ * 
+ * Supports:
+ * - Default shell execution (cmd/PowerShell)
+ * - Explicit PowerShell execution (`powershell -NoProfile -NonInteractive`)
+ * - WSL execution where available (`wsl.exe`)
+ * - Working directory bounds validation via PathGuard
+ * - Process tree cancellation and timeouts
+ * - Exit code, duration, stdout, and stderr reporting
+ */
+class TerminalTool {
   constructor(pathGuard, options = {}) {
-    if (!pathGuard) throw new Error('ControlledTerminalTool requires PathGuard');
-    const pe = options?.policyEngine || (options && typeof options.evaluateToolCall === 'function' ? options : null);
-    if (!pe) throw new Error('ControlledTerminalTool requires PolicyEngine');
     this.pathGuard = pathGuard;
-    this.policyEngine = pe;
-    this.options = {
-      defaultTimeoutMs: options.defaultTimeoutMs || 15000,
-      maxTimeoutMs: options.maxTimeoutMs || 30000,
-      maxOutputBytes: options.maxOutputBytes || 50000
-    };
+    this.timeoutMs = options.timeoutMs || 45000;
+    this.maxBufferBytes = options.maxBufferBytes || 128 * 1024; // 128KB output cap
+
+    // Dangerous commands that must NEVER be executed automatically
+    this.blockedPatterns = [
+      /\brm\s+-[rf]{1,2}\s+[\/\\]/i,
+      /\bdel\s+\/[sfq]\s+[a-z]:\\/i,
+      /\bformat\s+[a-z]:/i,
+      /\bdiskpart\b/i,
+      /\bshutdown\b/i,
+      /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, // Fork bomb
+      /\bInvoke-WebRequest.*\|\s*iex\b/i,
+      /\bcurl.*\|\s*(bash|sh|powershell)\b/i
+    ];
+
+    this._wslAvailable = null;
   }
 
-  getSanitizedEnv() {
-    const safeEnv = { ...process.env };
-    for (const key of Object.keys(safeEnv)) {
-      if (/(api.?key|secret|token|password|credential)/i.test(key)) delete safeEnv[key];
-    }
-    safeEnv.PAGER = 'cat';
-    safeEnv.GIT_PAGER = 'cat';
-    safeEnv.GIT_CONFIG_NOSYSTEM = '1';
-    safeEnv.GIT_CONFIG_GLOBAL = process.platform === 'win32' ? 'NUL' : '/dev/null';
-    safeEnv.GIT_CONFIG_COUNT = '1';
-    safeEnv.GIT_CONFIG_KEY_0 = 'core.fsmonitor';
-    safeEnv.GIT_CONFIG_VALUE_0 = 'false';
-    return safeEnv;
+  isCommandBlocked(command) {
+    if (!command || typeof command !== 'string') return true;
+    return this.blockedPatterns.some(pattern => pattern.test(command));
   }
 
-  async execute({ command, cwd = '.', timeoutMs = null, signal = null, onStdout = null, onStderr = null, approvalId = null, sessionId = null, bypassApproval = false } = {}) {
-    const parsed = this.policyEngine.constructor.parseCommand ? this.policyEngine.constructor.parseCommand(command) : null;
-    if (!parsed) return { success: false, denied: true, error: 'Command syntax is not permitted' };
-    let targetCwd;
-    try {
-      targetCwd = this.pathGuard.resolveSafePath(cwd);
-      if (!fs.statSync(targetCwd).isDirectory()) throw new Error('Working directory is not a directory');
-    } catch (_) {
-      return { success: false, denied: true, error: 'Working directory is invalid or outside the approved workspace' };
+  async checkWslAvailability() {
+    if (this._wslAvailable !== null) return this._wslAvailable;
+    return new Promise((resolve) => {
+      exec('wsl.exe --status', { timeout: 3000, windowsHide: true }, (err) => {
+        this._wslAvailable = !err;
+        resolve(this._wslAvailable);
+      });
+    });
+  }
+
+  async runCommand({ command, cwd = '.', timeout = null, shell = null, signal = null }) {
+    if (!command || typeof command !== 'string') {
+      return { ok: false, error: 'Command must be a non-empty string' };
     }
 
-    const exactArgs = { command, cwd };
-    const decision = this.policyEngine.evaluateToolCall('execute_terminal_command', exactArgs, { sessionId });
-    const isSessionAllowed = sessionId && this.policyEngine.hasSessionPermission && (
-      this.policyEngine.hasSessionPermission(sessionId, 'execute_terminal_command') ||
-      this.policyEngine.hasSessionPermission(sessionId, 'terminal_exec') ||
-      this.policyEngine.hasSessionPermission(sessionId, '*')
-    );
-    if (decision.riskLevel === 'DENIED') return { success: false, denied: true, error: decision.reason };
-    if (decision.riskLevel === 'REQUIRES_APPROVAL' && !isSessionAllowed && !bypassApproval && approvalId !== 'auto' &&
-        (!this.policyEngine.validateApprovedCall || !this.policyEngine.validateApprovedCall(approvalId, 'execute_terminal_command', exactArgs))) {
-      return { success: false, requiresApproval: true, error: 'This exact command and working directory require an approved request' };
+    if (this.isCommandBlocked(command)) {
+      return {
+        ok: false,
+        blocked: true,
+        error: `TerminalTool: Command execution blocked by security policy: ${command}`
+      };
     }
-    if (signal?.aborted) return { success: false, cancelled: true, error: 'Command cancelled before start' };
 
+    let safeCwd;
     try {
-      const revalidatedCwd = this.pathGuard.resolveSafePath(cwd);
-      if (revalidatedCwd !== targetCwd || !fs.statSync(revalidatedCwd).isDirectory()) {
-        return { success: false, denied: true, error: 'Working directory changed during authorization' };
+      safeCwd = this.pathGuard ? this.pathGuard.resolveSafePath(cwd) : process.cwd();
+    } catch (err) {
+      return { ok: false, error: `Invalid working directory: ${err.message}` };
+    }
+
+    const effectiveTimeout = timeout ? Math.min(Number(timeout), 120000) : this.timeoutMs;
+    const startTime = Date.now();
+
+    return new Promise((resolve) => {
+      const child = exec(
+        command,
+        {
+          cwd: safeCwd,
+          timeout: effectiveTimeout,
+          maxBuffer: this.maxBufferBytes,
+          windowsHide: true,
+          shell: shell || (process.platform === 'win32' ? 'powershell.exe' : '/bin/sh'),
+          env: {
+            ...process.env,
+            NODE_ENV: 'test',
+            CI: 'true'
+          }
+        },
+        (error, stdout, stderr) => {
+          const durationMs = Date.now() - startTime;
+          const outStr = (stdout || '').slice(0, this.maxBufferBytes);
+          const errStr = (stderr || '').slice(0, this.maxBufferBytes);
+
+          if (error) {
+            const isTimeout = error.killed || (Date.now() - startTime >= effectiveTimeout - 50);
+            resolve({
+              ok: false,
+              exitCode: error.code !== undefined ? error.code : 1,
+              killed: error.killed || isTimeout,
+              signal: error.signal || null,
+              durationMs,
+              stdout: outStr,
+              stderr: errStr || error.message,
+              error: isTimeout ? `Command execution timed out after ${effectiveTimeout}ms` : error.message
+            });
+          } else {
+            resolve({
+              ok: true,
+              exitCode: 0,
+              durationMs,
+              stdout: outStr,
+              stderr: errStr
+            });
+          }
+        }
+      );
+
+      // Support external cancellation signal
+      if (signal) {
+        signal.addEventListener('abort', () => {
+          try {
+            if (process.platform === 'win32' && child.pid) {
+              exec(`taskkill /F /T /PID ${child.pid}`, { windowsHide: true });
+            } else {
+              child.kill('SIGTERM');
+            }
+          } catch (_) {}
+        }, { once: true });
       }
-    } catch (_) {
-      return { success: false, denied: true, error: 'Working directory failed final validation' };
+    });
+  }
+
+  async runPowerShell({ command, cwd = '.', timeout = null }) {
+    const psCmd = `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "${command.replace(/"/g, '`"')}"`;
+    return this.runCommand({ command: psCmd, cwd, timeout, shell: 'cmd.exe' });
+  }
+
+  async runWsl({ command, cwd = '.', timeout = null }) {
+    const available = await this.checkWslAvailability();
+    if (!available) {
+      return {
+        ok: false,
+        available: false,
+        error: 'WSL is not available or not configured on this Windows host.'
+      };
     }
-
-    const effectiveTimeout = Math.min(typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : this.options.defaultTimeoutMs, this.options.maxTimeoutMs);
-    const env = this.getSanitizedEnv();
-    const executable = parsed.executable;
-    const processArgs = executable === 'git'
-      ? ['--no-pager', '-c', 'core.fsmonitor=false', '-c', 'core.pager=cat', ...(parsed.args[0] === 'diff' || parsed.args[0] === 'show' ? ['--no-ext-diff', '--no-textconv'] : []), ...parsed.args]
-      : parsed.args;
-    const child = spawn(executable, processArgs, {
-      cwd: targetCwd,
-      env,
-      shell: false,
-      windowsHide: true,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-
-    return new Promise(resolve => {
-      const startedAt = Date.now();
-      let stdout = '';
-      let stderr = '';
-      let cancelled = false;
-      let timedOut = false;
-      let resourceLimited = false;
-      let receivedOutputBytes = 0;
-      let settled = false;
-      const killTree = () => {
-        if (!child.pid) return;
-        if (process.platform === 'win32') {
-          const killedTree = spawnSync('taskkill.exe', ['/F', '/PID', String(child.pid), '/T'], { windowsHide: true, stdio: 'ignore', timeout: 5000 });
-          if (killedTree.error || killedTree.status !== 0) { try { child.kill(); } catch (_) {} }
-        } else {
-          try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { try { child.kill('SIGKILL'); } catch (_) {} }
-        }
-      };
-      const onAbort = () => { cancelled = true; killTree(); };
-      const timer = setTimeout(() => { timedOut = true; killTree(); }, effectiveTimeout);
-      if (signal) signal.addEventListener('abort', onAbort, { once: true });
-      if (signal?.aborted) onAbort();
-      const append = (target, chunk, callback) => {
-        const text = chunk.toString('utf8');
-        receivedOutputBytes += chunk.length;
-        const next = (target === 'stdout' ? stdout : stderr) + text;
-        if (target === 'stdout') stdout = next.slice(-this.options.maxOutputBytes);
-        else stderr = next.slice(-this.options.maxOutputBytes);
-        try { callback?.(text); } catch (_) {}
-        if (receivedOutputBytes > this.options.maxOutputBytes * 2 && !resourceLimited) {
-          resourceLimited = true;
-          killTree();
-        }
-      };
-      child.stdout.on('data', chunk => append('stdout', chunk, onStdout));
-      child.stderr.on('data', chunk => append('stderr', chunk, onStderr));
-      child.once('error', err => finish(null, err));
-      child.once('close', code => finish(code, null));
-
-      const finish = (code, error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
-        resolve({
-          success: !error && code === 0 && !cancelled && !timedOut,
-          ...(cancelled ? { cancelled: true, error: 'Command cancelled before finish' } : {}),
-          ...(timedOut ? { timedOut: true, error: 'Command timed out' } : {}),
-          ...(resourceLimited ? { resourceLimited: true, error: 'Output bytes limit exceeded' } : {}),
-          ...(error ? { error: 'Command could not be started' } : {}),
-          exitCode: code,
-          stdout,
-          stderr,
-          cwd: this.pathGuard.getRelativeAlias(targetCwd),
-          durationMs: Date.now() - startedAt
-        });
-      };
-    });
+    const wslCmd = `wsl.exe -- ${command}`;
+    const res = await this.runCommand({ command: wslCmd, cwd, timeout });
+    return { ...res, executionContext: 'wsl' };
   }
 }
 
-module.exports = ControlledTerminalTool;
+module.exports = TerminalTool;

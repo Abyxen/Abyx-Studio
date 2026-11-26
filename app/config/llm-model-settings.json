@@ -14,7 +14,7 @@
         "ubatchSize": 512,
         "flashAttn": true
       },
-      "updatedAt": "2026-11-25T22:46:31.190Z"
+      "updatedAt": "2026-11-26T00:20:27.941Z"
     },
     "gemma-4-26B-A4B-it-uncensored-Q4_K_M.gguf": {
       "preferredBackend": "cuda",

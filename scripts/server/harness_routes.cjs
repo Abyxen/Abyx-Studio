@@ -257,6 +257,19 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
     }
   }
 
+  // POST /api/orchestrator/recover
+  if (req.method === "POST" && pathname === "/api/orchestrator/recover") {
+    try {
+      const body = await readJsonBody(req, res);
+      if (!body || !body.runId) return json(res, 400, { ok: false, error: "Missing runId" });
+      const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
+      const result = await runtime.orchestrator.recoverAndResume(body.runId, body);
+      return json(res, 200, result);
+    } catch (err) {
+      return json(res, 500, { ok: false, error: err.message });
+    }
+  }
+
   // GET /api/orchestrator/active
   if (req.method === "GET" && pathname === "/api/orchestrator/active") {
     const runtime = getAgentRuntime(workspaceService, profileId, aiProviders);
@@ -331,6 +344,30 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
       approvedRoots: runtime.pathGuard.approvedRoots,
       allowTerminal: runtime.policyEngine.options.allowTerminal,
       allowBrowser: runtime.policyEngine.options.allowBrowser,
+    });
+  }
+
+  // GET /api/security/status
+  if (req.method === "GET" && pathname === "/api/security/status") {
+    const runtime = getAgentRuntime(workspaceService, profileId);
+    const sandboxStatus = runtime.sandboxManager ? await runtime.sandboxManager.getStatus() : null;
+    return json(res, 200, {
+      ok: true,
+      mode: runtime.securityEngine ? runtime.securityEngine.mode : (runtime.policyEngine ? runtime.policyEngine.mode : 'build'),
+      sandbox: sandboxStatus,
+      approvedRoots: runtime.pathGuard ? runtime.pathGuard.approvedRoots : []
+    });
+  }
+
+  // GET /api/security/workspaces
+  if (req.method === "GET" && pathname === "/api/security/workspaces") {
+    const runtime = getAgentRuntime(workspaceService, profileId);
+    const workspaces = runtime.workspaceIsolation ? Array.from(runtime.workspaceIsolation.taskWorkspaces.values()) : [];
+    const locks = runtime.workspaceIsolation ? Array.from(runtime.workspaceIsolation.activeLocks.entries()).map(([p, l]) => ({ path: p, ...l })) : [];
+    return json(res, 200, {
+      ok: true,
+      workspaces,
+      activeLocks: locks
     });
   }
 
@@ -431,9 +468,11 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
   // GET /api/agent/approvals
   if (req.method === "GET" && pathname === "/api/agent/approvals") {
     const runtime = getAgentRuntime(workspaceService, profileId);
+    const secApprovals = runtime.securityEngine ? runtime.securityEngine.listPendingApprovals() : [];
+    const polApprovals = runtime.policyEngine ? runtime.policyEngine.getPendingApprovals() : [];
     return json(res, 200, {
       ok: true,
-      approvals: runtime.policyEngine.getPendingApprovals(),
+      approvals: [...secApprovals, ...polApprovals],
     });
   }
 
@@ -446,7 +485,13 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
         return json(res, 400, { ok: false, error: "approvalId and approved (boolean) are required" });
       }
       const runtime = getAgentRuntime(workspaceService, profileId);
-      const resolved = runtime.engine.resolveApproval(body.approvalId, body.approved ? "approve" : "deny");
+      let resolved = false;
+      if (runtime.securityEngine) {
+        resolved = runtime.securityEngine.resolveApproval(body.approvalId, body.approved, body.reason || "", body.persist || false);
+      }
+      if (!resolved && runtime.policyEngine) {
+        resolved = runtime.policyEngine.resolveApproval(body.approvalId, body.approved, body.reason || "");
+      }
       return json(res, 200, { ok: true, resolved });
     } catch (err) {
       return json(res, 400, { ok: false, error: err.message });

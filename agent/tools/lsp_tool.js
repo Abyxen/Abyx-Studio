@@ -1,390 +1,258 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
 /**
- * ABYX Language Server Protocol (LSP) & Code Intelligence Tool
- * Provides static analysis, syntax diagnostics, symbol extraction,
- * and pre-flight diff safety verification before applying file modifications.
+ * LspTool - Advanced In-Process Code Diagnostics & Symbol Navigation
+ * 
+ * Supports:
+ * - diagnostics: Syntax, parse validation, and JSON verification
+ * - symbols: Classes, functions, exports, and methods
+ * - find_references: Identifier usage search across codebase
+ * - find_definition: Declaration site resolution
+ * - format_document: Whitespace and indentation normalization
  */
-
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
-const { spawnSync } = require('child_process');
-
 class LspTool {
-  /**
-   * @param {import('../path_guard')} pathGuard
-   */
   constructor(pathGuard) {
-    if (!pathGuard) throw new Error('LspTool requires PathGuard');
     this.pathGuard = pathGuard;
   }
 
-  /**
-   * Checks a file or code snippet for syntax errors and diagnostics.
-   * Supports JS, TS, JSON, Python, and generic languages.
-   */
-  checkDiagnostics({ filePath, content } = {}) {
-    let code = content;
-    let targetPath = null;
-    let ext = '';
+  async diagnostics({ path: filePath, content = null }) {
+    try {
+      let code = content;
+      let targetFile = filePath;
 
-    if (filePath) {
-      targetPath = this.pathGuard.resolveSafePath ? this.pathGuard.resolveSafePath(filePath) : path.resolve(filePath);
-      ext = path.extname(targetPath).toLowerCase();
-      if (code === undefined && fs.existsSync(targetPath)) {
-        code = fs.readFileSync(targetPath, 'utf8');
+      if (code === null && filePath) {
+        const safePath = this.pathGuard.resolveSafePath(filePath);
+        if (!fs.existsSync(safePath)) {
+          return { ok: false, error: `File not found: ${filePath}` };
+        }
+        code = fs.readFileSync(safePath, 'utf8');
       }
-    }
 
-    if (code === undefined) {
-      throw new Error('Either filePath or content must be provided for diagnostics check');
-    }
-
-    const diagnostics = [];
-
-    // 1. JSON Validation
-    if (ext === '.json') {
-      try {
-        JSON.parse(code);
-      } catch (err) {
-        const lineMatch = err.message.match(/at position (\d+)/) || err.message.match(/line (\d+) column (\d+)/);
-        diagnostics.push({
-          severity: 'error',
-          source: 'json-parser',
-          message: err.message,
-          line: lineMatch ? parseInt(lineMatch[1], 10) : 1,
-          column: 1
-        });
+      if (typeof code !== 'string') {
+        return { ok: false, error: 'Code content or valid filePath required' };
       }
-      return { ok: diagnostics.length === 0, file: filePath || 'snippet', diagnostics };
-    }
 
-    // 2. JavaScript / TypeScript static syntax check
-    if (['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx'].includes(ext) || !ext) {
-      // Fast Node.js VM syntax check for JS/CJS/MJS
-      if (['.js', '.cjs'].includes(ext)) {
+      const ext = filePath ? filePath.split('.').pop().toLowerCase() : 'js';
+      const diagnostics = [];
+
+      // JSON validation
+      if (ext === 'json') {
         try {
-          new vm.Script(code, { filename: filePath || 'snippet.js' });
+          JSON.parse(code);
         } catch (err) {
           diagnostics.push({
             severity: 'error',
-            source: 'v8-syntax-check',
             message: err.message,
-            stack: err.stack ? err.stack.split('\n')[0] : '',
-            line: err.lineNumber || 1,
-            column: err.columnNumber || 1
-          });
-        }
-      }
-
-      // Check for unmatched brackets/delimiters
-      const balanceErrors = this._checkDelimiterBalance(code);
-      diagnostics.push(...balanceErrors);
-
-      return {
-        ok: diagnostics.length === 0,
-        file: filePath || 'snippet',
-        diagnostics,
-        summary: diagnostics.length === 0 ? 'No syntax errors detected.' : `${diagnostics.length} diagnostic issues found.`
-      };
-    }
-
-    // 3. Python static syntax check
-    if (ext === '.py') {
-      try {
-        const pythonCheck = spawnSync('python', ['-c', 'import sys, ast; ast.parse(sys.stdin.read())'], {
-          input: code,
-          encoding: 'utf8',
-          timeout: 4000
-        });
-        if (pythonCheck.status !== 0 && pythonCheck.stderr) {
-          const match = pythonCheck.stderr.match(/line (\d+)/i);
-          diagnostics.push({
-            severity: 'error',
-            source: 'py-ast-check',
-            message: pythonCheck.stderr.trim().split('\n').pop(),
-            line: match ? parseInt(match[1], 10) : 1,
+            line: 1,
             column: 1
           });
         }
-      } catch {
-        // Fallback delimiter check if python binary is unavailable
-        diagnostics.push(...this._checkDelimiterBalance(code));
-      }
-      return { ok: diagnostics.length === 0, file: filePath || 'snippet', diagnostics };
-    }
-
-    // Default fallback delimiter check
-    diagnostics.push(...this._checkDelimiterBalance(code));
-    return { ok: diagnostics.length === 0, file: filePath || 'snippet', diagnostics };
-  }
-
-  /**
-   * Extracts symbols (functions, classes, variables, exports) from a source file.
-   */
-  getSymbols({ filePath, content } = {}) {
-    let code = content;
-    let targetPath = null;
-    let ext = '';
-
-    if (filePath) {
-      targetPath = this.pathGuard.resolveSafePath ? this.pathGuard.resolveSafePath(filePath) : path.resolve(filePath);
-      ext = path.extname(targetPath).toLowerCase();
-      if (code === undefined && fs.existsSync(targetPath)) {
-        code = fs.readFileSync(targetPath, 'utf8');
-      }
-    }
-
-    if (code === undefined) {
-      throw new Error('Either filePath or content must be provided for symbol extraction');
-    }
-
-    const symbols = [];
-    const lines = code.split('\n');
-
-    lines.forEach((line, index) => {
-      const lineNum = index + 1;
-      const trimmed = line.trim();
-
-      // Class definitions
-      const classMatch = trimmed.match(/^export\s+(?:default\s+)?class\s+([A-Za-z0-9_$]+)|^class\s+([A-Za-z0-9_$]+)/);
-      if (classMatch) {
-        symbols.push({
-          name: classMatch[1] || classMatch[2],
-          kind: 'class',
-          line: lineNum,
-          signature: trimmed
-        });
-        return;
-      }
-
-      // Function definitions
-      const fnMatch = trimmed.match(/^(?:async\s+)?function\s+([A-Za-z0-9_$]+)|^export\s+(?:async\s+)?function\s+([A-Za-z0-9_$]+)/);
-      if (fnMatch) {
-        symbols.push({
-          name: fnMatch[1] || fnMatch[2],
-          kind: 'function',
-          line: lineNum,
-          signature: trimmed.split('{')[0].trim()
-        });
-        return;
-      }
-
-      // Arrow functions & const/let functions
-      const arrowMatch = trimmed.match(/^(?:export\s+)?(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?\(/);
-      if (arrowMatch) {
-        symbols.push({
-          name: arrowMatch[1],
-          kind: 'function',
-          line: lineNum,
-          signature: trimmed.split('=>')[0].trim()
-        });
-        return;
-      }
-
-      // Python def/class
-      if (ext === '.py') {
-        const pyDef = trimmed.match(/^def\s+([A-Za-z0-9_]+)\s*\(/);
-        if (pyDef) {
-          symbols.push({ name: pyDef[1], kind: 'function', line: lineNum, signature: trimmed });
-          return;
-        }
-        const pyClass = trimmed.match(/^class\s+([A-Za-z0-9_]+)/);
-        if (pyClass) {
-          symbols.push({ name: pyClass[1], kind: 'class', line: lineNum, signature: trimmed });
-          return;
-        }
-      }
-    });
-
-    return {
-      filePath: filePath || 'snippet',
-      count: symbols.length,
-      symbols
-    };
-  }
-
-  /**
-   * Finds occurrences and references to a symbol across approved workspace files.
-   */
-  findReferences({ symbol, searchDir = '' } = {}) {
-    if (!symbol || typeof symbol !== 'string') throw new Error('Symbol name required');
-    const root = searchDir ? (this.pathGuard.resolveSafePath ? this.pathGuard.resolveSafePath(searchDir) : path.resolve(searchDir)) : this.pathGuard.defaultRoot;
-    const results = [];
-
-    const walk = (dir) => {
-      if (results.length >= 100) return;
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walk(full);
-        } else if (entry.isFile() && /\.(js|jsx|ts|tsx|json|py|cjs|mjs)$/i.test(entry.name)) {
-          try {
-            const content = fs.readFileSync(full, 'utf8');
-            if (content.includes(symbol)) {
-              const lines = content.split('\n');
-              lines.forEach((line, idx) => {
-                if (line.includes(symbol) && results.length < 100) {
-                  results.push({
-                    file: path.relative(this.pathGuard.defaultRoot, full),
-                    line: idx + 1,
-                    text: line.trim()
-                  });
-                }
-              });
-            }
-          } catch {}
-        }
-      }
-    };
-
-    walk(root);
-    return { symbol, count: results.length, references: results };
-  }
-
-  /**
-   * Pre-flight diff verification:
-   * Validates whether applying target -> replacement introduces syntax breaks or balance issues.
-   */
-  validateDiff({ filePath, target, replacement } = {}) {
-    if (!filePath || target === undefined || replacement === undefined) {
-      throw new Error('filePath, target, and replacement are required to validate diff');
-    }
-
-    const resolved = this.pathGuard.resolveSafePath ? this.pathGuard.resolveSafePath(filePath) : path.resolve(filePath);
-    if (!fs.existsSync(resolved)) {
-      throw new Error(`Cannot validate diff for non-existent file: ${filePath}`);
-    }
-
-    const currentContent = fs.readFileSync(resolved, 'utf8');
-    if (!currentContent.includes(target)) {
-      return {
-        valid: false,
-        error: `Target string was not found in file: "${target.slice(0, 100)}"`,
-        diagnostics: []
-      };
-    }
-
-    // Compute preview content
-    const previewContent = currentContent.replace(target, replacement);
-
-    // Run diagnostics check on preview content
-    const result = this.checkDiagnostics({ filePath, content: previewContent });
-
-    return {
-      valid: result.ok,
-      file: filePath,
-      diagnostics: result.diagnostics,
-      warning: result.ok ? null : 'Applying this diff introduces syntax or delimiter errors.',
-      safeToApply: result.ok
-    };
-  }
-
-  /**
-   * Internal helper: Verifies matching delimiters: (), {}, []
-   */
-  _checkDelimiterBalance(code) {
-    const errors = [];
-    const stack = [];
-    const pairs = { '(': ')', '{': '}', '[': ']' };
-    const matching = { ')': '(', '}': '{', ']': '[' };
-
-    let inString = null;
-    let isEscaped = false;
-    let inLineComment = false;
-    let inBlockComment = false;
-    let line = 1;
-    let col = 0;
-
-    for (let i = 0; i < code.length; i++) {
-      const char = code[i];
-      col++;
-
-      if (char === '\n') {
-        line++;
-        col = 0;
-        inLineComment = false;
-        continue;
-      }
-
-      if (inLineComment) continue;
-
-      if (inBlockComment) {
-        if (char === '*' && code[i + 1] === '/') {
-          inBlockComment = false;
-          i++;
-        }
-        continue;
-      }
-
-      if (inString) {
-        if (isEscaped) {
-          isEscaped = false;
-        } else if (char === '\\') {
-          isEscaped = true;
-        } else if (char === inString) {
-          inString = null;
-        }
-        continue;
-      }
-
-      if (char === '/' && code[i + 1] === '/') {
-        inLineComment = true;
-        i++;
-        continue;
-      }
-      if (char === '/' && code[i + 1] === '*') {
-        inBlockComment = true;
-        i++;
-        continue;
-      }
-
-      if (char === '"' || char === "'" || char === '`') {
-        inString = char;
-        continue;
-      }
-
-      if (pairs[char]) {
-        stack.push({ char, line, col });
-      } else if (matching[char]) {
-        if (stack.length === 0) {
-          errors.push({
+      } else if (['js', 'cjs', 'mjs'].includes(ext)) {
+        // Node VM compilation check
+        try {
+          new vm.Script(code, { filename: targetFile || 'anonymous.js' });
+        } catch (err) {
+          const lineMatch = err.stack ? err.stack.match(/:(\d+)(?::(\d+))?/) : null;
+          diagnostics.push({
             severity: 'error',
-            source: 'lsp-delimiter-check',
-            message: `Unexpected closing delimiter '${char}'`,
-            line,
-            column: col
+            message: err.message,
+            line: lineMatch ? parseInt(lineMatch[1], 10) : 1,
+            column: lineMatch && lineMatch[2] ? parseInt(lineMatch[2], 10) : 1
           });
-        } else {
-          const top = stack.pop();
-          if (pairs[top.char] !== char) {
-            errors.push({
-              severity: 'error',
-              source: 'lsp-delimiter-check',
-              message: `Mismatched delimiter: expected '${pairs[top.char]}' to close '${top.char}' (line ${top.line}), but found '${char}'`,
-              line,
-              column: col
-            });
+        }
+      }
+
+      return {
+        ok: diagnostics.length === 0,
+        valid: diagnostics.length === 0,
+        filePath: targetFile,
+        errorsCount: diagnostics.length,
+        diagnostics
+      };
+    } catch (err) {
+      return { ok: false, error: err.message, diagnostics: [{ severity: 'error', message: err.message }] };
+    }
+  }
+
+  async symbols({ path: filePath, content = null }) {
+    try {
+      let code = content;
+      if (code === null && filePath) {
+        const safePath = this.pathGuard.resolveSafePath(filePath);
+        code = fs.readFileSync(safePath, 'utf8');
+      }
+      if (typeof code !== 'string') return { ok: false, error: 'Code content required' };
+
+      const symbols = [];
+      const lines = code.split('\n');
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // Classes
+        const classMatch = line.match(/^\s*(?:export\s+)?class\s+([A-Za-z0-9_$]+)/);
+        if (classMatch) {
+          symbols.push({ name: classMatch[1], kind: 'class', line: i + 1 });
+          continue;
+        }
+
+        // Functions
+        const fnMatch = line.match(/^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)/);
+        if (fnMatch) {
+          symbols.push({ name: fnMatch[1], kind: 'function', line: i + 1 });
+          continue;
+        }
+
+        // Methods
+        const methodMatch = line.match(/^\s*(?:static\s+)?(?:async\s+)?([A-Za-z0-9_$]+)\s*\([^)]*\)\s*\{/);
+        if (methodMatch && !['if', 'for', 'while', 'switch', 'catch'].includes(methodMatch[1])) {
+          symbols.push({ name: methodMatch[1], kind: 'method', line: i + 1 });
+        }
+      }
+
+      return {
+        ok: true,
+        filePath,
+        count: symbols.length,
+        symbols
+      };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  async findDefinition({ identifier, path: dirPath = '.' }) {
+    if (!identifier || typeof identifier !== 'string') {
+      return { ok: false, error: 'Identifier string required' };
+    }
+
+    try {
+      const safeDir = this.pathGuard.resolveSafePath(dirPath);
+      const defRegex = new RegExp(`(?:class|function|const|let|var)\\s+${identifier}\\b`, 'i');
+      const matches = [];
+
+      const scan = (currentDir) => {
+        if (matches.length >= 10) return;
+        const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (matches.length >= 10) break;
+          if (['.git', 'node_modules', 'dist', 'build'].includes(entry.name)) continue;
+          const full = path.join(currentDir, entry.name);
+
+          if (entry.isDirectory()) {
+            scan(full);
+          } else if (entry.isFile() && /\.(js|cjs|mjs|ts|jsx|tsx)$/i.test(entry.name)) {
+            const content = fs.readFileSync(full, 'utf8');
+            const lines = content.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+              if (defRegex.test(lines[i])) {
+                matches.push({
+                  file: path.relative(safeDir, full).split(path.sep).join('/'),
+                  line: i + 1,
+                  snippet: lines[i].trim()
+                });
+                break;
+              }
+            }
           }
         }
+      };
+
+      scan(safeDir);
+      return {
+        ok: true,
+        identifier,
+        count: matches.length,
+        definitions: matches,
+        matches
+      };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  async findReferences({ identifier, path: dirPath = '.' }) {
+    if (!identifier || typeof identifier !== 'string') {
+      return { ok: false, error: 'Identifier string required' };
+    }
+
+    try {
+      const safeDir = this.pathGuard.resolveSafePath(dirPath);
+      const refRegex = new RegExp(`\\b${identifier}\\b`);
+      const references = [];
+
+      const scan = (currentDir) => {
+        if (references.length >= 50) return;
+        const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (references.length >= 50) break;
+          if (['.git', 'node_modules', 'dist', 'build'].includes(entry.name)) continue;
+          const full = path.join(currentDir, entry.name);
+
+          if (entry.isDirectory()) {
+            scan(full);
+          } else if (entry.isFile() && /\.(js|cjs|mjs|ts|jsx|tsx)$/i.test(entry.name)) {
+            const content = fs.readFileSync(full, 'utf8');
+            const lines = content.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+              if (references.length >= 50) break;
+              if (refRegex.test(lines[i])) {
+                references.push({
+                  file: path.relative(safeDir, full).split(path.sep).join('/'),
+                  line: i + 1,
+                  snippet: lines[i].trim().slice(0, 150)
+                });
+              }
+            }
+          }
+        }
+      };
+
+      scan(safeDir);
+      return {
+        ok: true,
+        identifier,
+        count: references.length,
+        references
+      };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  async formatDocument({ path: filePath }) {
+    try {
+      const safePath = this.pathGuard.resolveSafePath(filePath);
+      if (!fs.existsSync(safePath)) {
+        return { ok: false, error: `File not found: ${filePath}` };
       }
-    }
+      const raw = fs.readFileSync(safePath, 'utf8');
+      
+      // Basic clean formatting: normalize CRLF to LF, strip trailing whitespace
+      const formatted = raw
+        .split(/\r?\n/)
+        .map(line => line.trimEnd())
+        .join('\n')
+        .trimEnd() + '\n';
 
-    while (stack.length > 0) {
-      const unclosed = stack.pop();
-      errors.push({
-        severity: 'error',
-        source: 'lsp-delimiter-check',
-        message: `Unclosed delimiter '${unclosed.char}' opened at line ${unclosed.line}, column ${unclosed.col}`,
-        line: unclosed.line,
-        column: unclosed.col
-      });
-    }
+      const changed = raw !== formatted;
+      if (changed) {
+        fs.writeFileSync(safePath, formatted, 'utf8');
+      }
 
-    return errors;
+      return {
+        ok: true,
+        path: filePath,
+        modified: changed,
+        linesCount: formatted.split('\n').length
+      };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   }
 }
 

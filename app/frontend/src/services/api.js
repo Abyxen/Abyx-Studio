@@ -2298,6 +2298,15 @@ export async function cancelOrchestration(runId, reason) {
   return await readJsonResponse(res, "Failed to cancel orchestration.");
 }
 
+export async function recoverOrchestration(runId) {
+  const res = await fetch("/api/orchestrator/recover", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ runId }),
+  });
+  return await readJsonResponse(res, "Failed to recover orchestration.");
+}
+
 export async function getActiveOrchestrations() {
   const res = await fetch("/api/orchestrator/active");
   return await readJsonResponse(res, "Failed to fetch active orchestrations.");

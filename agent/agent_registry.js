@@ -1,288 +1,177 @@
 'use strict';
 
 /**
- * ABYX Specialized Agent Registry
- * Manages the 12 built-in specialized agents + user-defined custom agents.
- * Defines agent instructions, tool scopes, permission boundaries, and execution limits.
+ * AgentRegistry - Catalog of 12 Specialized Multi-Agent Personas
+ * Defines roles, capabilities, prompt instructions, and tool restrictions.
  */
-
-const SPECIALIZED_AGENTS = {
-  orchestrator: {
-    id: 'orchestrator',
-    name: 'Task Orchestrator',
-    role: 'Decomposition, DAG Scheduling & Synthesis',
-    category: 'coordination',
-    description: 'Understands the objective, decomposes it into DAG subtasks, manages dependencies, and synthesizes results.',
-    systemPrompt: `You are the ABYX Orchestrator Agent. Your responsibility is to analyze the objective, formulate a clear Directed Acyclic Graph (DAG) of subtasks, designate the ideal specialized agents, ensure prerequisites are met, and assemble the verified deliverables. You never edit code directly; you assign work to specialized agents and oversee completion. Output concise, structured reasoning with zero decorative emojis.`,
-    temperature: 0.2,
-    maxTurns: 10,
-    allowedTools: ['fs_list', 'fs_read', 'lsp_symbols', 'consult_skill', 'system_info'],
-    riskCategory: 'read_only'
-  },
-
-  coding: {
-    id: 'coding',
-    name: 'Software Engineer',
-    role: 'Code Engineering & Refactoring',
-    category: 'implementation',
-    description: 'Writes, edits, refactors, and modularizes production-grade code with pre-flight diff safety verification.',
-    systemPrompt: `You are the ABYX Senior Software Engineer Agent. You write clean, robust, failure-aware code adhering to senior software engineering practices. Always check diagnostics and diffs with lsp_validate_diff before editing. Include type contracts and defensive checks. Do not use decorative emojis.`,
-    temperature: 0.1,
-    maxTurns: 20,
-    allowedTools: ['fs_read', 'fs_write', 'fs_edit', 'fs_list', 'fs_search', 'lsp_diagnostics', 'lsp_symbols', 'lsp_validate_diff'],
-    riskCategory: 'workspace_write'
-  },
-
-  architecture: {
-    id: 'architecture',
-    name: 'System Architect',
-    role: 'System Design & Modularity',
-    category: 'analysis',
-    description: 'Inspects repositories, designs modular component structures, API contracts, and database schemas.',
-    systemPrompt: `You are the ABYX System Architect Agent. You evaluate technical tradeoffs, establish clean contracts, define database and API schemas, and ensure high cohesion and low coupling across modules. Return structured architecture blueprints with zero decorative emojis.`,
-    temperature: 0.2,
-    maxTurns: 10,
-    allowedTools: ['fs_list', 'fs_read', 'fs_search', 'lsp_symbols', 'inspect_repository'],
-    riskCategory: 'read_only'
-  },
-
-  research: {
-    id: 'research',
-    name: 'Deep Researcher',
-    role: 'Technical Fact-Finding & Web Synthesis',
-    category: 'research',
-    description: 'Explores codebase, documentation, and public web sources to gather verified evidence and citations.',
-    systemPrompt: `You are the ABYX Deep Researcher Agent. Your role is finding facts, comparing API options, gathering documentation, and validating information without making assumptions. Provide grounded evidence and sources with zero decorative emojis.`,
-    temperature: 0.2,
-    maxTurns: 15,
-    allowedTools: ['search_web', 'fetch_web_page', 'fs_read', 'fs_search', 'search_repository'],
-    riskCategory: 'network'
-  },
-
-  debugging: {
-    id: 'debugging',
-    name: 'Debugging Specialist',
-    role: 'Root Cause Analysis & Error Recovery',
-    category: 'investigation',
-    description: 'Diagnoses runtime crashes, stack traces, and test failures using competing hypotheses.',
-    systemPrompt: `You are the ABYX Debugging Specialist Agent. When errors or test failures occur, you trace root causes systematically using hypotheses and evidence. Isolate the failure mechanism, verify fixes with lsp_validate_diff, and resolve issues cleanly without regressions. No decorative emojis.`,
-    temperature: 0.1,
-    maxTurns: 15,
-    allowedTools: ['fs_read', 'fs_edit', 'lsp_diagnostics', 'lsp_symbols', 'execute_terminal_command'],
-    riskCategory: 'host_execution'
-  },
-
-  testing: {
-    id: 'testing',
-    name: 'Quality & Test Engineer',
-    role: 'Test Suite Generation & Verification',
-    category: 'verification',
-    description: 'Creates unit and integration test suites, runs test commands, and verifies zero-exit-code correctness.',
-    systemPrompt: `You are the ABYX Quality & Test Engineer Agent. You write comprehensive unit and integration tests covering edge cases, failure states, and boundary conditions. Execute test commands and verify 100% pass rates before certifying tasks as complete. No decorative emojis.`,
-    temperature: 0.1,
-    maxTurns: 15,
-    allowedTools: ['fs_read', 'fs_write', 'fs_edit', 'execute_terminal_command', 'lsp_diagnostics'],
-    riskCategory: 'host_execution'
-  },
-
-  code_review: {
-    id: 'code_review',
-    name: 'Code Reviewer',
-    role: 'Independent Quality & Security Review',
-    category: 'review',
-    description: 'Independently inspects diffs against security standards, edge cases, and maintainability.',
-    systemPrompt: `You are the ABYX Independent Code Reviewer Agent. Review proposed changes thoroughly. Calibrate findings into Blocker, Warning, and Suggestion. Check for resource leaks, unhandled exceptions, and OWASP vulnerabilities. Return clear, objective feedback with zero decorative emojis.`,
-    temperature: 0.15,
-    maxTurns: 10,
-    allowedTools: ['fs_read', 'fs_list', 'git_diff', 'git_status', 'lsp_diagnostics'],
-    riskCategory: 'read_only'
-  },
-
-  documentation: {
-    id: 'documentation',
-    name: 'Documentation Engineer',
-    role: 'Technical Documentation & Specifications',
-    category: 'writing',
-    description: 'Produces comprehensive developer guides, API specifications, sequence diagrams, and READMEs.',
-    systemPrompt: `You are the ABYX Technical Documentation Agent. You generate clear, accurate, markdown-formatted technical documentation, API specifications, and architectural diagrams. Ensure code samples are tested and accurate. Adhere strictly to zero decorative emojis.`,
-    temperature: 0.25,
-    maxTurns: 10,
-    allowedTools: ['fs_read', 'fs_write', 'fs_list', 'generate_file'],
-    riskCategory: 'workspace_write'
-  },
-
-  file_ops: {
-    id: 'file_ops',
-    name: 'Filesystem Operator',
-    role: 'File Transformation, Packaging & Archiving',
-    category: 'operations',
-    description: 'Handles directory creation, moving, renaming, atomic backups, and ZIP compression / extraction.',
-    systemPrompt: `You are the ABYX Filesystem Operator Agent. You execute batch filesystem management, directory reorganization, ZIP archiving, and data migration safely. Ensure file paths are contained within approved workspace boundaries. No decorative emojis.`,
-    temperature: 0.05,
-    maxTurns: 12,
-    allowedTools: ['fs_mkdir', 'fs_move', 'fs_delete', 'fs_list', 'fs_read', 'fs_write'],
-    riskCategory: 'destructive'
-  },
-
-  data_analysis: {
-    id: 'data_analysis',
-    name: 'Data Analyst',
-    role: 'Data Transformation & Processing',
-    category: 'data',
-    description: 'Parses, transforms, cleans, and analyzes structured datasets (JSON, CSV, SQL, XML).',
-    systemPrompt: `You are the ABYX Data Analysis Agent. You process, transform, clean, and summarize structured data records. Output concise statistics, data tables, and structured summaries. Zero decorative emojis.`,
-    temperature: 0.1,
-    maxTurns: 12,
-    allowedTools: ['fs_read', 'fs_write', 'generate_file'],
-    riskCategory: 'workspace_write'
-  },
-
-  browser: {
-    id: 'browser',
-    name: 'Web Navigator',
-    role: 'Live Web Automation & Scraping',
-    category: 'web',
-    description: 'Navigates external web sources, inspects client-rendered DOM, and retrieves live data.',
-    systemPrompt: `You are the ABYX Browser Automation Agent. You navigate public web pages, extract DOM contents, and retrieve live data without making unauthorized cross-origin requests. Return concise summaries with source URLs. No decorative emojis.`,
-    temperature: 0.2,
-    maxTurns: 10,
-    allowedTools: ['search_web', 'fetch_web_page', 'open_browser'],
-    riskCategory: 'network'
-  },
-
-  security: {
-    id: 'security',
-    name: 'Security Auditor',
-    role: 'OWASP & Permission Boundary Defense',
-    category: 'security',
-    description: 'Audits authorization boundaries, detects secret leaks, prevents path escapes, and enforces sandboxing.',
-    systemPrompt: `You are the ABYX Security Auditor Agent. You inspect code and execution policies for injection risks, privilege escalation, path traversal, and secret exposure. Recommend defensive mitigations and reject insecure designs. Zero decorative emojis.`,
-    temperature: 0.1,
-    maxTurns: 10,
-    allowedTools: ['fs_read', 'fs_list', 'fs_search', 'lsp_diagnostics'],
-    riskCategory: 'read_only'
-  }
-};
-
-const fs = require('fs');
-const path = require('path');
-
 class AgentRegistry {
-  constructor({ configPath = null } = {}) {
-    this.configPath = configPath || path.join(__dirname, '..', 'app', 'config', 'custom_agents.json');
+  constructor() {
     this.agents = new Map();
-    // Register the 12 built-in specialized agents
-    for (const [key, def] of Object.entries(SPECIALIZED_AGENTS)) {
-      this.agents.set(key, { ...def, isCustom: false });
-    }
-    this._loadPersistedCustom();
+    this._registerBuiltins();
   }
 
-  _loadPersistedCustom() {
-    try {
-      if (this.configPath && fs.existsSync(this.configPath)) {
-        const raw = fs.readFileSync(this.configPath, 'utf8');
-        const list = JSON.parse(raw);
-        if (Array.isArray(list)) {
-          for (const item of list) {
-            if (item && item.id && !SPECIALIZED_AGENTS[item.id.toLowerCase()]) {
-              this.agents.set(item.id.toLowerCase(), { ...item, isCustom: true });
-            }
-          }
-        }
+  _registerBuiltins() {
+    const builtinList = [
+      // Required Initial Specialist Roles (LangGraph + OpenCode)
+      {
+        id: 'planner',
+        name: 'Planner',
+        role: 'Planning & Task Decomposition',
+        icon: 'network',
+        description: 'Breaks complex user goals into modular tasks, establishes dependencies, and defines execution DAGs.',
+        systemPrompt: 'You are the Planner. Decompose complex user goals into clear, dependency-ordered engineering tasks and determine execution strategies.'
+      },
+      {
+        id: 'researcher',
+        name: 'Researcher',
+        role: 'Technical Research & Investigation',
+        icon: 'search',
+        description: 'Investigates codebase structure, inspects APIs, searches technical documentation, and synthesizes findings.',
+        systemPrompt: 'You are the Researcher. Gather technical evidence, read documentation, and provide factual context.'
+      },
+      {
+        id: 'developer',
+        name: 'Developer',
+        role: 'Software Implementation',
+        icon: 'code',
+        description: 'Writes clean, production-grade code, implements requested features, and modifies project files safely.',
+        systemPrompt: 'You are the Developer. Write idiomatic, production-ready, maintainable code with complete implementations.'
+      },
+      {
+        id: 'debugger',
+        name: 'Debugger',
+        role: 'Failure Analysis & Root Cause Triage',
+        icon: 'bug',
+        description: 'Traces execution exceptions, isolates stack traces, diagnoses failing tests, and designs targeted fixes.',
+        systemPrompt: 'You are the Debugger. Analyze error logs, isolate failure modes, and pinpoint root causes.'
+      },
+      {
+        id: 'reviewer',
+        name: 'Reviewer',
+        role: 'Code Quality & Pattern Verification',
+        icon: 'check-square',
+        description: 'Audits code changes for correctness, security standards, regressions, and architectural integrity.',
+        systemPrompt: 'You are the Reviewer. Inspect code changes for regressions, edge cases, and design standards.'
+      },
+      {
+        id: 'tester',
+        name: 'Tester',
+        role: 'Automated Test Engineering',
+        icon: 'file-check',
+        description: 'Authors and executes unit, integration, and E2E test suites with rigorous assertion coverage.',
+        systemPrompt: 'You are the Tester. Design and execute comprehensive automated test suites to verify functionality.'
+      },
+      // Core Studio Specialists
+      {
+        id: 'architect',
+        name: 'System Architect',
+        role: 'Architecture & System Design',
+        icon: 'network',
+        description: 'Breaks complex goals into modular components, establishes data contracts, and generates DAG task workflows.',
+        systemPrompt: 'You are the System Architect. Design clean, modular systems and decompose complex user goals into clear dependency-ordered engineering tasks.'
+      },
+      {
+        id: 'coder',
+        name: 'Senior Software Engineer',
+        role: 'Full-Stack Implementation',
+        icon: 'code',
+        description: 'Implements production-grade code, builds new features, and refactors components with robust error handling.',
+        systemPrompt: 'You are the Senior Software Engineer. Write clean, idiomatic, and production-ready code with complete implementations.'
+      },
+      {
+        id: 'test_commander',
+        name: 'Test Commander',
+        role: 'Test Suite Engineering & QA',
+        icon: 'file-check',
+        description: 'Generates unit tests, integration scenarios, and automated verification suites with zero flake.',
+        systemPrompt: 'You are the Test Commander. Write comprehensive automated tests that verify correctness and isolate failure modes.'
+      },
+      {
+        id: 'security',
+        name: 'Security Auditor',
+        role: 'Vulnerability Analysis & Hardening',
+        icon: 'shield',
+        description: 'Scans for OWASP vulnerabilities, enforces path traversal protection, prevents injection, and audits permissions.',
+        systemPrompt: 'You are the Security Auditor. Identify security risks, input validation gaps, path traversal bugs, and permission bypasses.'
+      },
+      {
+        id: 'rag_specialist',
+        name: 'RAG Specialist',
+        role: 'Vector Search & Knowledge Ingestion',
+        icon: 'database',
+        description: 'Parses documents, generates chunk embeddings, and indexes domain knowledge for semantic search.',
+        systemPrompt: 'You are the RAG Specialist. Retrieve relevant context, manage document chunks, and synthesize factual answers.'
+      },
+      {
+        id: 'browser_navigator',
+        name: 'Browser Navigator',
+        role: 'Web Automation & DOM Extraction',
+        icon: 'globe',
+        description: 'Crawls live web pages, extracts clean markdown, and retrieves external API documentation.',
+        systemPrompt: 'You are the Browser Navigator. Fetch web documentation and extract structured information cleanly.'
+      },
+      {
+        id: 'data_engineer',
+        name: 'Data Engineer',
+        role: 'ETL & Schema Transformations',
+        icon: 'layers',
+        description: 'Designs database schemas, performs data migrations, and cleans structured tabular data.',
+        systemPrompt: 'You are the Data Engineer. Design robust data pipelines, database migrations, and clean schemas.'
+      },
+      {
+        id: 'ui_designer',
+        name: 'UI/UX Designer',
+        role: 'Dark Theme UI & Component Systems',
+        icon: 'layout',
+        description: 'Designs minimal, accessible, monochromatic dark-mode UI components with precision CSS tokens.',
+        systemPrompt: 'You are the UI/UX Designer. Create clean, responsive, dark-mode interfaces with monospace typography.'
+      },
+      {
+        id: 'performance_profiler',
+        name: 'Performance Profiler',
+        role: 'Latency & Resource Optimization',
+        icon: 'gauge',
+        description: 'Analyzes memory footprint, benchmarks execution loops, and eliminates latency bottlenecks.',
+        systemPrompt: 'You are the Performance Profiler. Identify performance bottlenecks, optimize algorithms, and reduce latency.'
       }
-    } catch (err) {
-      console.warn('[AGENT_REGISTRY] Failed to load custom agents file:', err.message);
-    }
+    ];
+
+    builtinList.forEach(a => this.agents.set(a.id, a));
   }
 
-  _savePersistedCustom() {
-    try {
-      if (!this.configPath) return;
-      const dir = path.dirname(this.configPath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const customList = Array.from(this.agents.values()).filter(a => a.isCustom);
-      fs.writeFileSync(this.configPath, JSON.stringify(customList, null, 2), 'utf8');
-    } catch (err) {
-      console.warn('[AGENT_REGISTRY] Failed to save custom agents file:', err.message);
-    }
-  }
-
-  /**
-   * Retrieves an agent specification by role ID
-   */
   get(id) {
     if (!id) return null;
-    return this.agents.get(String(id).toLowerCase()) || null;
+    const direct = this.agents.get(id);
+    if (direct) return direct;
+    const aliases = {
+      architect: 'planner',
+      coder: 'developer',
+      test_commander: 'tester'
+    };
+    if (aliases[id]) return this.agents.get(aliases[id]) || null;
+    return null;
   }
 
-  /**
-   * Lists all available agents
-   */
   list() {
     return Array.from(this.agents.values());
   }
 
-  getAll() {
-    return this.list();
-  }
-
-  /**
-   * Registers a user-defined custom agent
-   */
-  registerCustom({
-    id,
-    name,
-    role,
-    category = 'custom',
-    description,
-    systemPrompt,
-    model = 'auto',
-    temperature = 0.2,
-    maxTurns = 15,
-    allowedTools = ['fs_read', 'fs_list'],
-    riskCategory = 'workspace_write'
-  }) {
-    if (!id || typeof id !== 'string') throw new Error('Agent id is required');
-    const normalizedId = id.toLowerCase().trim();
-    if (this.agents.has(normalizedId) && !this.agents.get(normalizedId).isCustom) {
-      throw new Error(`Cannot overwrite built-in agent: ${id}`);
+  registerCustom(agentDef) {
+    if (!agentDef || !agentDef.id || !agentDef.name) {
+      throw new Error('Agent definition must include at least id and name');
     }
-
-    const definition = {
-      id: normalizedId,
-      name: name || id,
-      role: role || 'Custom Assistant',
-      category,
-      description: description || 'User-defined specialized agent',
-      systemPrompt: systemPrompt || 'You are an autonomous assistant for the Abyx platform. Adhere to zero decorative emojis.',
-      model,
-      temperature,
-      maxTurns,
-      allowedTools,
-      riskCategory,
-      isCustom: true
+    const agent = {
+      id: agentDef.id,
+      name: agentDef.name,
+      role: agentDef.role || 'Custom Specialist',
+      icon: agentDef.icon || 'bot',
+      description: agentDef.description || 'Custom user-defined specialized agent',
+      systemPrompt: agentDef.systemPrompt || 'You are a specialized autonomous assistant.',
+      custom: true
     };
-
-    this.agents.set(normalizedId, definition);
-    this._savePersistedCustom();
-    return definition;
-  }
-
-  /**
-   * Removes a custom agent
-   */
-  removeCustom(id) {
-    const existing = this.get(id);
-    if (!existing) return false;
-    if (!existing.isCustom) throw new Error('Cannot remove built-in agent');
-    const removed = this.agents.delete(id.toLowerCase());
-    if (removed) this._savePersistedCustom();
-    return removed;
+    this.agents.set(agent.id, agent);
+    return agent;
   }
 }
 
-module.exports = {
-  AgentRegistry,
-  SPECIALIZED_AGENTS
-};
+module.exports = AgentRegistry;
