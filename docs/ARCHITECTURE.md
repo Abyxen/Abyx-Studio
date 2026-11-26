@@ -109,9 +109,17 @@ ABYX Unified AI Studio transforms from a basic model frontend into a production-
 - **Durable Checkpoints:** Every state transition is recorded to SQLite / `app/data/orchestrations.json` to allow pause, inspection, and resumption.
 
 ### 3.5. Memory & Blackboard (SQLite + OpenClaw + Mem0 Reference)
-- **Modules:** [agent/shared_memory.js](file:///C:/Users/abira/Documents/Local%20Ai%20studio%20Abyx/agent/shared_memory.js), [agent/message_bus.js](file:///C:/Users/abira/Documents/Local%20Ai%20studio%20Abyx/agent/message_bus.js), [db.js](file:///C:/Users/abira/Documents/Local%20Ai%20studio%20Abyx/db.js)
-- **Inter-Agent Blackboard:** Provides shared findings and key-value state across agents.
-- **Message Bus:** Supports point-to-point direct messages and broadcast events with correlation IDs.
+- **Modules:** [agent/memory/memory_manager.js](file:///C:/Users/abira/Documents/Local%20Ai%20studio%20Abyx/agent/memory/memory_manager.js), [agent/skills/skill_engine.js](file:///C:/Users/abira/Documents/Local%20Ai%20studio%20Abyx/agent/skills/skill_engine.js), [agent/plugins/plugin_manager.js](file:///C:/Users/abira/Documents/Local%20Ai%20studio%20Abyx/agent/plugins/plugin_manager.js)
+- **3-Tier Memory Architecture:** Ephemeral session memory, SQLite project-scoped memory with project isolation, and persistent cross-project memory with FTS text indexing. Deduplication via SHA-256 fingerprints, multi-signal relevance scoring, non-blind selective persistence, and TTL pruning.
+- **Skill Engine:** Parses standard `SKILL.md` format, YAML frontmatter, lazy-loading instruction bodies, trigger matching, and untrusted third-party approval.
+- **Plugin Manager:** Scoped tool registration, non-blocking lifecycle hooks (`onSessionStart`, `onBeforeToolExecute`, `onAfterToolExecute`), custom agent prompt modifiers, and permission trust boundaries.
+
+### 3.6. Verification & Autonomous Work (OpenHands + Harbor + Terminal-Bench Reference)
+- **Modules:** [agent/verification/verification_engine.js](file:///C:/Users/abira/Documents/Local%20Ai%20studio%20Abyx/agent/verification/verification_engine.js), [agent/verification/reviewer_agent.js](file:///C:/Users/abira/Documents/Local%20Ai%20studio%20Abyx/agent/verification/reviewer_agent.js), [agent/verification/autonomous_recovery.js](file:///C:/Users/abira/Documents/Local%20Ai%20studio%20Abyx/agent/verification/autonomous_recovery.js), [agent/verification/benchmark_suite.js](file:///C:/Users/abira/Documents/Local%20Ai%20studio%20Abyx/agent/verification/benchmark_suite.js)
+- **Independent Verification Engine:** Independent assertions of file existence, non-empty contents, mock/TODO placeholder rejection, patch validation, build verification, test suite execution in sanitized child environment, and git diff inspection.
+- **Read-Only Reviewer Agent:** Audits deliverables for syntax correctness, secret/credential leaks, unintended file modifications, mock stubs, and test coverage before completion.
+- **Autonomous Recovery & Bounded Correction:** Bounded self-correction loop (max 3 attempts), state preservation via git snapshots, actionable feedback formulation, re-verification, and honest failure reporting (invariant: never claims tests passed when not run or failing).
+- **Benchmark & Evaluation Suite:** Catalogs 12 standard reproducible benchmark tasks (exploration, bug fixing, refactoring, tool use, multi-agent coordination, verification, recovery) with profiling of CPU user/system time, RAM RSS/heap usage, model/tool call counts, and token consumption.
 
 ---
 

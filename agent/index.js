@@ -28,6 +28,10 @@ const SandboxManager = require('./security/sandbox_manager');
 const { MemoryManager, SessionMemory } = require('./memory/memory_manager');
 const SkillEngine = require('./skills/skill_engine');
 const PluginManager = require('./plugins/plugin_manager');
+const VerificationEngine = require('./verification/verification_engine');
+const ReviewerAgent = require('./verification/reviewer_agent');
+const AutonomousRecovery = require('./verification/autonomous_recovery');
+const BenchmarkSuite = require('./verification/benchmark_suite');
 
 /**
  * createAgentEngine - Master Factory Function for ABYX Agent Subsystem
@@ -125,6 +129,27 @@ function createAgentEngine(options = {}) {
     toolGateway
   });
 
+  // Verification & Evaluation Subsystems (Phase 9)
+  const verificationEngine = options.verificationEngine || new VerificationEngine({
+    workspaceRoot,
+    gitAdapter,
+    pathGuard
+  });
+
+  const reviewerAgent = options.reviewerAgent || new ReviewerAgent({
+    workspaceRoot,
+    modelRouter
+  });
+
+  const autonomousRecovery = options.autonomousRecovery || new AutonomousRecovery({
+    gitAdapter,
+    logger
+  });
+
+  const benchmarkSuite = options.benchmarkSuite || new BenchmarkSuite({
+    workspaceRoot
+  });
+
   return {
     workspaceRoot,
     pathGuard,
@@ -141,6 +166,10 @@ function createAgentEngine(options = {}) {
     memoryManager,
     skillEngine,
     pluginManager,
+    verificationEngine,
+    reviewerAgent,
+    autonomousRecovery,
+    benchmarkSuite,
     providerRegistry,
     modelAdapter,
     cancellationManager,
@@ -181,5 +210,9 @@ module.exports = {
   MemoryManager,
   SessionMemory,
   SkillEngine,
-  PluginManager
+  PluginManager,
+  VerificationEngine,
+  ReviewerAgent,
+  AutonomousRecovery,
+  BenchmarkSuite
 };
