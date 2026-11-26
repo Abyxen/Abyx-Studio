@@ -1,29 +1,75 @@
 {
-  "regressionSuite": {
-    "suites": 11,
-    "tests": 66,
-    "passed": 66,
-    "failed": 0,
-    "durationMs": 8572
+  "testExecutionDate": "2026-11-26T09:07:00Z",
+  "commit": "8f57415",
+  "regressionSuiteSummary": {
+    "totalFiles": 10,
+    "passingFiles": 6,
+    "failingFiles": 4,
+    "failures": [
+      { "file": "scripts/tests/stage12_harness_capabilities.test.cjs", "error": "TypeError: WorkspaceFsTool is not a constructor" },
+      { "file": "scripts/tests/stage6_agent_capabilities.test.cjs", "error": "Error: Cannot find module '../../services/context_manager'" },
+      { "file": "scripts/tests/stage5_extensibility.test.cjs", "error": "TypeError: ToolRegistry is not a constructor (5 subtests failed)" },
+      { "file": "scripts/tests/workspaces_stage10.test.cjs", "error": "TypeError: fsTool.write is not a function (3 subtests failed)" }
+    ]
   },
-  "benchmarkRunner": {
-    "definedTasks": 44,
-    "executedTasks": 15,
-    "passed": 15,
-    "failed": 0,
-    "overallScore": 100
+  "benchmarkSummary": {
+    "catalogTasksDefined": 275,
+    "catalogTasksExecuted": 0,
+    "runnerTasksDefined": 44,
+    "runnerTasksExecuted": 15,
+    "runnerTasksPassed": 15,
+    "runnerTasksFailed": 0,
+    "runnerScorePercent": 100
   },
-  "independentAuditTests": {
-    "runtime_live_session": { "status": "BROKEN", "error": "this.logger.recordEvent is not a function" },
-    "context_compaction": { "status": "VERIFIED", "originalMessages": 34, "constructedMessages": 6, "transcriptPreserved": true },
-    "security_env_sanitization": { "status": "BROKEN", "sandboxEnvLeakedToTerminal": true },
-    "security_path_traversal": { "status": "VERIFIED", "blocked": true },
-    "security_dangerous_cmd_turbo": { "status": "VERIFIED", "formatCBlocked": true },
-    "orchestrator_3agent_http": { "status": "VERIFIED", "statusCode": 200, "durationMs": 14775 },
-    "memory_dedup_isolation": { "status": "VERIFIED", "ftsEnabled": false },
-    "browser_interact": { "status": "BROKEN", "simulated": true },
-    "browser_screenshot": { "status": "BROKEN", "error": "Playwright browser binary not installed" },
-    "pdf_zip_generation": { "status": "VERIFIED", "pdfBytes": 42626, "zipBytes": 1041 },
-    "office_docx_xlsx_pptx": { "status": "MISSING" }
+  "independentVerificationResults": {
+    "office_document_generation": {
+      "status": "VERIFIED",
+      "formatsTested": ["PDF", "DOCX", "XLSX", "PPTX", "RTF", "ZIP", "CSV", "JSON", "HTML", "MD", "PNG"],
+      "passed": 11,
+      "failed": 0
+    },
+    "runtime_live_session": {
+      "status": "BROKEN",
+      "error": "TypeError: this.logger.recordEvent is not a function at emitEvent (agent/runtime_controller.js:121:21)"
+    },
+    "security_env_leak": {
+      "status": "BROKEN",
+      "leakedSecret": "SECRET_LEAK_TOKEN_999",
+      "reason": "TerminalTool.runCommand ignores env parameter and spreads process.env"
+    },
+    "security_path_traversal": {
+      "status": "VERIFIED",
+      "pathGuardBlocked": true
+    },
+    "security_destructive_commands": {
+      "status": "VERIFIED",
+      "formatCBlocked": true,
+      "turboModeSafe": true
+    },
+    "hardware_inference": {
+      "status": "VERIFIED",
+      "device": "NVIDIA GeForce RTX 5060 Laptop GPU",
+      "contextTokens": 32768,
+      "generationTokensPerSec": 46.8,
+      "promptTokensPerSec": 960.2,
+      "oomOccurred": false
+    },
+    "multiagent_orchestration": {
+      "status": "VERIFIED",
+      "agentsInDag": 3,
+      "statusCode": 200,
+      "durationMs": 14775
+    },
+    "browser_automation": {
+      "status": "BROKEN",
+      "playwrightInstalled": false,
+      "interactReturnsSimulated": true,
+      "screenshotsSupported": false
+    },
+    "desktop_standalone_packaging": {
+      "status": "VERIFIED",
+      "electronStandaloneExeBytes": 250417664,
+      "nsisSetupExeBytes": 145785412
+    }
   }
 }

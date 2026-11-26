@@ -1,20 +1,42 @@
 # ABYX — BENCHMARK IMPLEMENTATION AUDIT
 
-## 1. Independent Count & Structure Audit
-- **Task Definition File:** `benchmarks/tasks/benchmark_tasks.json`
-  - **Actual Defined Tasks:** **44** (NOT 100 as claimed in `ABYX_FINAL_CERTIFICATION.md:89`)
-  - **Task / Context / Format Compliance:** **44 / 44** tasks have `task`, `context`, and `format` fields.
-- **Execution Results File:** `benchmarks/reports/benchmark_results.json`
-  - **Actual Executed Tasks:** **15** (`passTasks: 15`, `partialTasks: 0`, `failTasks: 0`, `overallScore: 100%`, `durationMs: 3375`).
-  - **Unexecuted Defined Tasks:** 29 tasks in `benchmark_tasks.json` were NOT executed by `benchmark_runner.cjs`.
+## 1. Catalog vs Execution Discrepancy
 
-## 2. Audit Checklist (Section 8)
-| Criterion | Result | Evidence |
-|---|---|---|
-| At least 100 distinct tasks exist | **FAIL** | Only 44 tasks in `benchmark_tasks.json` (+12 in `agent/verification/benchmark_suite.js`, still <100) |
-| Tasks follow Task / Context / Format | **PASS** | 44/44 defined tasks follow T/C/F |
-| Tasks actually executed | **PARTIAL** | 15/44 executed in `benchmark_runner.cjs` |
-| Validators independently checked results | **PASS** | Runner checks HTTP status, file existence, HTML tags, PathGuard blocks |
-| Recorded scores match actual evidence | **PASS** | Verified `benchmark_results.json` matches runner stdout (`15/15`, `822ms` inference) |
-| Local and cloud evaluations separated | **PARTIAL** | Local model tested; cloud evaluation skipped (no API keys configured) |
-| Hardware measurements are real | **PASS** | `nvidia-smi` values (`5946 MiB`, `50.75°C`) match live GPU state |
+A strict audit of the benchmark infrastructure reveals a significant gap between defined benchmarks and actual executed tasks:
+
+1. **`benchmarks/tasks/catalog.json`**:
+   - Defines **275** granular task specifications across 12 categories (A through L).
+   - Format follows structured schemas with difficulty ratings, inputs, and expected outputs.
+2. **`benchmarks/reports/TASK_LEVEL_RESULTS.json`**:
+   - Lists all **275** tasks from the catalog.
+   - **Actual Execution Status:** **0 of 275 tasks were executed**.
+   - Every single task in the file records:
+     ```json
+     "status": "not_run",
+     "score": null,
+     "attemptCount": 0,
+     "verification": "not_run",
+     "evidence": [],
+     "notes": "No live Abyx agent run was executed in this benchmark pass."
+     ```
+3. **`benchmarks/tasks/benchmark_tasks.json`**:
+   - Contains a smaller subset of **44** tasks.
+4. **`benchmarks/reports/benchmark_results.json`**:
+   - Records only **15** executed tasks run via `benchmark_runner.cjs` (`15/15 passed`).
+   - 29 tasks in `benchmark_tasks.json` and 260 tasks in `catalog.json` were never executed.
+
+---
+
+## 2. Benchmark Audit Checklist (Section 8)
+
+| Criterion | Requirement | Finding | Evidence | Status |
+|---|---|---|---|---|
+| 1. Task Volume | $\ge 100$ distinct tasks | 275 tasks defined in catalog; 44 tasks in runner file | `catalog.json` (275 tasks), `benchmark_tasks.json` (44 tasks) | **VERIFIED** (Definition) |
+| 2. Task Structure | Task / Context / Format | Followed across all defined tasks | Inspect task objects | **VERIFIED** |
+| 3. Actual Execution | Real task execution through harness | Only 15 tasks executed; 275 tasks marked `"not_run"` | `TASK_LEVEL_RESULTS.json: "status": "not_run"` across all 275 items | **PARTIAL** |
+| 4. Independent Validation | Automated validators checking results | Runner validates file sizes, JSON schemas, HTTP codes | `benchmarks/evaluators/` scripts | **VERIFIED** |
+| 5. Evidence Match | Recorded scores backed by artifacts | 15 passing results match actual generated scratch files | `benchmarks/scratch/` files present | **VERIFIED** |
+| 6. Separation of Tiers | Local and cloud evaluated independently | Local model evaluated; cloud evaluations skipped | No API keys set for cloud providers | **PARTIAL** |
+| 7. Reproducibility | Deterministic replay of benchmark run | `node benchmark_runner.cjs` replays the 15 tests cleanly | Runner executed in 3.4 seconds | **VERIFIED** |
+
+**Conclusion:** The benchmark catalog and structure exist in high fidelity (275 defined tasks), but the full 100+ task execution pass was **never actually run against the agent runtime**.

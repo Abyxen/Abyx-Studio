@@ -1,12 +1,80 @@
 {
-  "runtime": { "piSdkInstalled": false, "customJsRuntime": true, "liveSessionStatus": "BROKEN" },
-  "context": { "tokenBudgeting": true, "compaction": true, "transcriptPreserved": true },
-  "filesystem": { "read": true, "write": true, "edit": true, "patch": true, "glob": true, "search": true, "rename": false, "move": false, "copy": false },
-  "terminal": { "powershell": true, "timeouts": true, "wsl2": false, "envSanitized": false },
-  "developer": { "git": true, "tests": true, "lsp": "regex_vm_fallback" },
-  "browser": { "httpNavigate": true, "playwrightInstalled": false, "interact": "simulated", "screenshots": false },
-  "documents": { "pdf": true, "zip": true, "docx": false, "xlsx": false, "pptx": false },
-  "orchestration": { "langgraphInstalled": false, "nativeDag": true, "cycleDetection": true, "multiAgentLive": true },
-  "memory": { "sqlite": true, "fts5": false, "deduplication": true, "projectIsolation": true },
-  "hardware": { "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU", "vramMiB": 8151, "localQueueConcurrency": 1, "singleModel": true }
+  "runtime": {
+    "piSdkInstalled": false,
+    "customJsRuntime": true,
+    "runtimeControllerStatus": "BROKEN",
+    "runtimeControllerError": "TypeError: this.logger.recordEvent is not a function"
+  },
+  "context": {
+    "tokenBudgeting": true,
+    "dynamicCompaction": true,
+    "transcriptPreservation": true
+  },
+  "filesystem": {
+    "readFile": true,
+    "writeFile": true,
+    "editFile": true,
+    "applyPatch": true,
+    "createDirectory": true,
+    "listDirectory": true,
+    "globFiles": true,
+    "searchFiles": true,
+    "searchContent": true,
+    "renameFile": false,
+    "moveFile": false,
+    "copyFile": false,
+    "pathGuardEnforced": true
+  },
+  "terminal": {
+    "powershell": true,
+    "timeouts": true,
+    "wsl2": false,
+    "envSanitizationWorking": false
+  },
+  "developer": {
+    "git": true,
+    "testRunner": true,
+    "lspDiagnostics": "in_process_vm_script",
+    "lspFullProtocol": false
+  },
+  "browser": {
+    "httpNavigate": true,
+    "playwrightInstalled": false,
+    "domInteraction": "simulated",
+    "screenshots": false
+  },
+  "documents": {
+    "pdf": true,
+    "docx": true,
+    "xlsx": true,
+    "pptx": true,
+    "rtf": true,
+    "zip": true,
+    "tar": true,
+    "rasterImages": true
+  },
+  "orchestration": {
+    "langgraphInstalled": false,
+    "nativeDag": true,
+    "cycleDetection": true,
+    "multiAgentLive": true
+  },
+  "memory": {
+    "sqlite": true,
+    "fts5": false,
+    "deduplication": true,
+    "projectIsolation": true
+  },
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+    "vramMiB": 8151,
+    "contextSizeTokens": 32768,
+    "localQueueConcurrency": 1,
+    "singleModelInstance": true,
+    "generationSpeedTokPerSec": 46.8
+  },
+  "packaging": {
+    "electronDesktopApp": true,
+    "nsisSetupInstaller": true
+  }
 }
