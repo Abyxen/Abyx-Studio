@@ -30,14 +30,14 @@ namespace Abyx
         {
             Console.Title = "ABYX Setup & Installer";
             Console.WriteLine("============================================================");
-            Console.WriteLine("   ABYX UNIFIED AI STUDIO    |  Setup & Installation");
+            Console.WriteLine("   ABYX UNIFIED AI STUDIO    |  Standalone App Setup");
             Console.WriteLine("============================================================");
 
             string rootDir = AppDomain.CurrentDomain.BaseDirectory;
             Console.WriteLine(string.Format("Installation Directory: {0}\n", rootDir));
 
-            // 1. Data directories
-            Console.WriteLine("[1/4] Preparing required application directories...");
+            // 1. Data and profile directories
+            Console.WriteLine("[1/4] Preparing required application & profile directories...");
             string[] directories = new string[]
             {
                 "app/outputs",
@@ -46,6 +46,7 @@ namespace Abyx
                 "app/transcriptions",
                 "app/tts-outputs",
                 "app/openvino-models",
+                "app/profile",
                 "data",
                 "benchmarks/scratch",
                 "benchmarks/reports"
@@ -73,11 +74,11 @@ namespace Abyx
             string abyxExe = Path.Combine(rootDir, "Abyx.exe");
 
             Console.WriteLine(string.Format("  ✓ Portable Node.js: {0}", File.Exists(nodePath) ? "Ready" : "Missing"));
-            Console.WriteLine(string.Format("  ✓ Frontend Web UI: {0}", File.Exists(distPath) ? "Built & Ready" : "Missing"));
+            Console.WriteLine(string.Format("  ✓ Frontend Bundle: {0}", File.Exists(distPath) ? "Built & Ready" : "Missing"));
             Console.WriteLine(string.Format("  ✓ Application Icon: {0}", File.Exists(icoPath) ? "Ready" : "Missing"));
 
-            // 3. Register Shortcuts
-            Console.WriteLine("\n[3/4] Creating system shortcuts...");
+            // 3. Register Desktop and Start Menu Shortcuts
+            Console.WriteLine("\n[3/4] Creating Windows standalone application shortcuts...");
             string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             string desktopDir = Path.Combine(userProfile, "Desktop");
             string startMenuDir = Path.Combine(
@@ -88,22 +89,22 @@ namespace Abyx
             if (Directory.Exists(desktopDir))
             {
                 string desktopLink = Path.Combine(desktopDir, "ABYX Unified AI Studio.lnk");
-                CreateShortcut(abyxExe, desktopLink, icoPath, "ABYX Unified AI Studio Workstation");
+                CreateShortcut(abyxExe, desktopLink, icoPath, "ABYX Standalone Desktop Application");
                 Console.WriteLine(string.Format("  ✓ Desktop Shortcut: {0}", desktopLink));
             }
 
             if (Directory.Exists(startMenuDir))
             {
                 string startLink = Path.Combine(startMenuDir, "ABYX Unified AI Studio.lnk");
-                CreateShortcut(abyxExe, startLink, icoPath, "ABYX Unified AI Studio Workstation");
+                CreateShortcut(abyxExe, startLink, icoPath, "ABYX Standalone Desktop Application");
                 Console.WriteLine(string.Format("  ✓ Start Menu Shortcut: {0}", startLink));
             }
 
             // 4. Complete
-            Console.WriteLine("\n[4/4] Installation & Configuration Complete!");
+            Console.WriteLine("\n[4/4] Setup Complete!");
             Console.WriteLine("============================================================");
-            Console.WriteLine("ABYX is fully installed and optimized for Windows 11.");
-            Console.WriteLine("Run Abyx.exe to start the workstation.\n");
+            Console.WriteLine("ABYX is configured as a standalone desktop application.");
+            Console.WriteLine("Run Abyx.exe to launch in its own standalone window.\n");
 
             if (args.Length > 0 && args[0].ToLower() == "--launch")
             {
