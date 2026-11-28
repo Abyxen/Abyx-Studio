@@ -1,7 +1,7 @@
 import React, { memo, useMemo, useRef, useState, useEffect } from "react";
 import {
   Image, Film, Box, Mic, Settings, Trash2, AudioLines, SquarePen, PanelLeftClose,
-  Search, X, ChevronRight, Pin, Pencil, Download, Check, Cpu
+  Search, X, ChevronRight, Pin, Pencil, Download, Check, Cpu, Command
 } from "lucide-react";
 import BrandMark from "./BrandMark";
 
@@ -189,6 +189,7 @@ function Sidebar({
   setSelectedSpeechTranscript,
   onDeleteSpeechTranscription,
   activeProject,
+  onOpenCommandPalette,
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -356,6 +357,17 @@ function Sidebar({
           <span className="sidebar-brand-name">ABYX</span>
         </div>
         <div className="sidebar-header-actions">
+          {onOpenCommandPalette && (
+            <button
+              type="button"
+              className="sidebar-icon-btn"
+              onClick={onOpenCommandPalette}
+              aria-label="Command palette (Ctrl+K)"
+              title="Command palette (Ctrl+K)"
+            >
+              <Command size={18} />
+            </button>
+          )}
           <button
             type="button"
             className={`sidebar-icon-btn ${searchOpen ? "active" : ""}`}

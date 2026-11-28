@@ -254,7 +254,9 @@ export default function TextToSpeech({
   }, [ttsSettings?.model]);
 
   useEffect(() => {
-    refresh().catch((err) => showAlert?.({ title: "Couldn't read voice status", message: err.message || String(err), danger: true }));
+    // Background status polling must not interrupt other screens with a modal when the
+    // local backend is offline; manual refreshes still surface the error.
+    refresh().catch((err) => console.warn("Voice status unavailable:", err.message || err));
     const interval = setInterval(() => {
       refresh().catch(() => {});
     }, 2500);

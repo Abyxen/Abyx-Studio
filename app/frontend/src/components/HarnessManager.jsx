@@ -2,9 +2,11 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Cpu, RefreshCw, CheckCircle2, ShieldCheck, Box, Layers, Terminal, Globe, Wrench,
   HardDrive, Brain, Play, Square, AlertCircle, FileText, FolderPlus, FilePlus, Plug,
-  Trash2, Move, Download, ExternalLink, Search, Sparkles, Check, X, Eye, FileCode, Users, Sliders, Network
+  Trash2, Move, Download, ExternalLink, Search, Sparkles, Check, X, Eye, FileCode, Users, Sliders, Network,
+  Activity, GitBranch, Gauge
 } from "lucide-react";
 import SubagentsHub from "./SubagentsHub";
+import { GitCheckpointsPanel, SandboxPanel, ContextInspectorPanel, ExecutionTracePanel } from "./HarnessInsights";
 import TerminalConsole from "./TerminalConsole";
 import DiffViewer from "./DiffViewer";
 import HarnessControlsDrawer from "./HarnessControlsDrawer";
@@ -103,7 +105,7 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
   const loadBaseData = useCallback(async () => {
     try {
       const [statusRes, pluginsRes, seamsRes] = await Promise.all([
-        getHarnessStatus().catch(() => ({ ok: true, harness: "Abyx Agent Harness", version: "1.1.0" })),
+        getHarnessStatus().catch((err) => ({ ok: false, offline: true, error: err.message })),
         getHarnessPlugins().catch(() => ({ ok: true, plugins: [] })),
         getHarnessSeams().catch(() => ({ ok: true, seams: [] })),
       ]);
@@ -511,47 +513,66 @@ export default function HarnessManager({ showAlert, onOpenBrowser, activeProject
         </div>
 
         {/* Tab Navigation */}
-        <div style={{ display: "flex", gap: 8, marginTop: 18, borderBottom: "1px solid var(--border-color)", paddingBottom: 8, overflowX: "auto" }}>
+        <nav className="harness-tabs" aria-label="Harness sections" role="tablist">
           {[
-            { id: "multiagent", label: "Multi-Agent Swarm (12)", icon: Network },
-            { id: "agent", label: "Agent Tasks & Loop", icon: Play },
-            { id: "terminal", label: "Terminal Runner", icon: Terminal },
-            { id: "subagents", label: "Subagent Team (7)", icon: Users },
-            { id: "skills", label: `Skills (${skills.length})`, icon: Sparkles },
-            { id: "tools", label: "Tools & Capabilities", icon: Wrench },
-            { id: "mcp", label: "MCP Servers", icon: Plug },
-            { id: "extensions", label: "Extensions", icon: Box },
-            { id: "files", label: "Workspace & Documents", icon: HardDrive },
-            { id: "browser", label: "Browser & Web", icon: Globe },
-            { id: "seams", label: "Microkernel Seams", icon: Layers },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "8px 16px",
-                  borderRadius: 6,
-                  border: "none",
-                  cursor: "pointer",
-                  fontWeight: 500,
-                  fontSize: "0.88rem",
-                  background: isActive ? "var(--md-sys-color-primary)" : "transparent",
-                  color: isActive ? "#ffffff" : "var(--md-sys-color-on-surface)",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                <Icon size={16} /> {tab.label}
-              </button>
-            );
-          })}
-        </div>
+            [
+              { id: "multiagent", label: "Swarm", icon: Network },
+              { id: "agent", label: "Agent Tasks", icon: Play },
+              { id: "subagents", label: "Subagents", icon: Users },
+              { id: "trace", label: "Trace", icon: Activity, isNew: true },
+            ],
+            [
+              { id: "git", label: "Git & Checkpoints", icon: GitBranch, isNew: true },
+              { id: "files", label: "Workspace", icon: HardDrive },
+              { id: "terminal", label: "Terminal", icon: Terminal },
+              { id: "browser", label: "Browser", icon: Globe },
+            ],
+            [
+              { id: "context", label: "Context", icon: Gauge, isNew: true },
+              { id: "skills", label: `Skills (${skills.length})`, icon: Sparkles },
+              { id: "tools", label: "Tools", icon: Wrench },
+              { id: "mcp", label: "MCP", icon: Plug },
+              { id: "extensions", label: "Extensions", icon: Box },
+            ],
+            [
+              { id: "sandbox", label: "Sandbox", icon: ShieldCheck, isNew: true },
+              { id: "seams", label: "Seams", icon: Layers },
+            ],
+          ].map((group, gi) => (
+            <div className="harness-tab-group" key={gi}>
+              {group.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    role="tab"
+                    aria-selected={isActive}
+                    className={`harness-tab ${isActive ? "is-active" : ""}`}
+                    onClick={() => setActiveTab(tab.id)}
+                  >
+                    <Icon size={15} aria-hidden="true" /> {tab.label}
+                    {tab.isNew && <span className="harness-tab-new">NEW</span>}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
       </div>
+
+      {activeTab === "git" && (
+        <div className="harness-panel"><GitCheckpointsPanel cwd={activeProject?.path || "."} showAlert={showAlert} /></div>
+      )}
+      {activeTab === "sandbox" && (
+        <div className="harness-panel"><SandboxPanel showAlert={showAlert} /></div>
+      )}
+      {activeTab === "context" && (
+        <div className="harness-panel"><ContextInspectorPanel activeProject={activeProject} /></div>
+      )}
+      {activeTab === "trace" && (
+        <div className="harness-panel"><ExecutionTracePanel /></div>
+      )}
 
       {/* ======================================================== */}
       {/* TAB 0: MULTI-AGENT SWARM & ORCHESTRATION (12 AGENTS)     */}

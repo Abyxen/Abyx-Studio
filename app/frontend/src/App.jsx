@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Sidebar from "./components/Sidebar";
+import CommandPalette from "./components/CommandPalette";
 import TopStatusBar from "./components/TopStatusBar";
 import Generator from "./components/Generator";
 import ModelManager from "./components/ModelManager";
@@ -99,7 +100,20 @@ function App() {
 
   // Navigation
   const [activeTab, setActiveTab] = useState(() => readRoute().tab);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState(() => readRoute().section || localStorage.getItem("settings_active_section") || "appearance");
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandPaletteOpen((open) => !open);
+      }
+      if (event.key === "Escape") setCommandPaletteOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // Prompts
   const [prompt, setPrompt] = useState("");
@@ -881,6 +895,7 @@ function App() {
       setSelectedSpeechTranscript={setSelectedSpeechTranscript}
       onDeleteSpeechTranscription={handleDeleteSpeechTranscription}
       activeProject={activeProject}
+      onOpenCommandPalette={() => setCommandPaletteOpen(true)}
     />
   ), [
     sidebarVisible, toggleSidebar, activeTab, openTabFromSidebar, specs, telemetry,
@@ -897,6 +912,12 @@ function App() {
 
   return (
     <div className="app-container">
+      <CommandPalette open={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} onNavigate={(item) => {
+        if (item.action === "new_chat") { handleNewChat(); return; }
+        if (item.action === "toggle_sidebar") { toggleSidebar(); return; }
+        if (item.section) { setSettingsSection(item.section); try { localStorage.setItem("settings_active_section", item.section); } catch (_) {} }
+        openTabFromSidebar(item.tab);
+      }} />
       {/* Sidebar with Navigation Rail & Specs */}
       {sidebarContent}
 

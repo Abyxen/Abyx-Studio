@@ -5039,3 +5039,12 @@ body {
   box-shadow: 0 0 10px rgba(69, 212, 131, 0.25);
   transform: translateY(-1px);
 }
+
+/* Global command palette */
+.abyx-command-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(4,8,18,.58);backdrop-filter:blur(7px);display:flex;justify-content:center;align-items:flex-start;padding: min(16vh,130px) 18px 24px}
+.abyx-command-palette{width:min(620px,100%);max-height:min(70vh,620px);display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--md-sys-color-outline-variant,rgba(255,255,255,.14));border-radius:16px;background:var(--md-sys-color-surface-container-high,var(--md-sys-color-surface,#171a22));box-shadow:0 24px 90px rgba(0,0,0,.42);color:var(--md-sys-color-on-surface,#eee)}
+.abyx-command-search{height:60px;display:flex;align-items:center;gap:12px;padding:0 17px;border-bottom:1px solid var(--md-sys-color-outline-variant,rgba(255,255,255,.12));color:var(--md-sys-color-on-surface-variant,#aab0bc)}
+.abyx-command-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:inherit;font:inherit;font-size:15px}.abyx-command-search kbd,.abyx-command-footer kbd{font:11px/1.5 inherit;padding:2px 6px;border:1px solid var(--md-sys-color-outline-variant,rgba(255,255,255,.2));border-radius:5px;color:var(--md-sys-color-on-surface-variant,#aab0bc)}
+.abyx-command-close{display:grid;place-items:center;border:0;background:transparent;color:inherit;padding:5px;border-radius:6px;cursor:pointer}.abyx-command-close:hover{background:var(--md-sys-color-surface-container-highest,rgba(255,255,255,.1))}
+.abyx-command-results{padding:9px;overflow:auto}.abyx-command-item{width:100%;display:flex;align-items:center;gap:12px;padding:11px 12px;border:0;border-radius:9px;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}.abyx-command-item span{flex:1}.abyx-command-item small{font-size:11px;color:var(--md-sys-color-on-surface-variant,#9299a8)}.abyx-command-item.is-active,.abyx-command-item:hover{background:var(--md-sys-color-secondary-container,rgba(100,130,190,.2));color:var(--md-sys-color-on-secondary-container,inherit)}.abyx-command-empty{padding:28px 14px;text-align:center;color:var(--md-sys-color-on-surface-variant,#aab0bc)}
+.abyx-command-footer{display:flex;gap:18px;padding:10px 15px;border-top:1px solid var(--md-sys-color-outline-variant,rgba(255,255,255,.12));font-size:11px;color:var(--md-sys-color-on-surface-variant,#aab0bc)}.abyx-command-footer span{display:flex;align-items:center;gap:5px}

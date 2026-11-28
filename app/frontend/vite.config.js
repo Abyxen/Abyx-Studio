@@ -1,11 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
 
   build: {
     // Output to app/dist/ so serve.cjs can find it
@@ -18,6 +19,7 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: host || false,
+    allowedHosts: ["abyx-ui-ux-upgrade-abyx-studio-42153e80d0c9eb74.v0.build"],
     hmr: host
       ? {
           protocol: "ws",
