@@ -159,16 +159,41 @@ try {
   console.warn("  [abyx] Could not load abyx_skills.js:", e.message);
 }
 
+const DOCS_ABYX = path.join(os.homedir(), "Documents", ".abyx");
+const DOCS_APP = path.join(DOCS_ABYX, "app");
+
+function ensureWritableDir(primaryPath, fallbackSubpath) {
+  try {
+    fs.mkdirSync(primaryPath, { recursive: true });
+    const probe = path.join(primaryPath, `.wtest-${Date.now()}`);
+    fs.writeFileSync(probe, '1');
+    fs.unlinkSync(probe);
+    return primaryPath;
+  } catch {
+    const fallbackPath = path.join(DOCS_APP, fallbackSubpath);
+    try { fs.mkdirSync(fallbackPath, { recursive: true }); } catch {}
+    return fallbackPath;
+  }
+}
+
+function resolveBinary(relPath) {
+  const rootCand = path.join(ROOT, "app", relPath);
+  if (fs.existsSync(rootCand)) return rootCand;
+  const docsCand = path.join(DOCS_APP, relPath);
+  if (fs.existsSync(docsCand)) return docsCand;
+  return rootCand;
+}
+
 const osPlatform = process.platform;
 const BACKEND_PATHS = {
-  cuda: path.join(ROOT, "app", "backend", "win", "cuda", "sd-cuda.exe"),
-  vulkan: path.join(ROOT, "app", "backend", "win", "vulkan", "sd-vulkan.exe"),
-  cpu: path.join(ROOT, "app", "backend", "win", "cpu", "sd-cpu.exe"),
-  mac: path.join(ROOT, "app", "backend", "mac", "sd"),
-  linuxCpu: path.join(ROOT, "app", "backend", "linux", "cpu", "sd-server-cpu"),
-  linuxVulkan: path.join(ROOT, "app", "backend", "linux", "vulkan", "sd-server-vulkan"),
-  linuxRocm: path.join(ROOT, "app", "backend", "linux", "rocm", "sd-server-rocm"),
-  linuxCuda: path.join(ROOT, "app", "backend", "linux", "cuda", "sd-server-cuda"),
+  cuda: resolveBinary(path.join("backend", "win", "cuda", "sd-cuda.exe")),
+  vulkan: resolveBinary(path.join("backend", "win", "vulkan", "sd-vulkan.exe")),
+  cpu: resolveBinary(path.join("backend", "win", "cpu", "sd-cpu.exe")),
+  mac: resolveBinary(path.join("backend", "mac", "sd")),
+  linuxCpu: resolveBinary(path.join("backend", "linux", "cpu", "sd-server-cpu")),
+  linuxVulkan: resolveBinary(path.join("backend", "linux", "vulkan", "sd-server-vulkan")),
+  linuxRocm: resolveBinary(path.join("backend", "linux", "rocm", "sd-server-rocm")),
+  linuxCuda: resolveBinary(path.join("backend", "linux", "cuda", "sd-server-cuda")),
 };
 let BACKEND_PATH = "";
 const backendSupportsFlags = {};
@@ -204,84 +229,57 @@ if (osPlatform === "win32") {
     BACKEND_PATH = BACKEND_PATHS.linuxVulkan;
   }
 }
-const MODELS  = path.join(ROOT, "app", "models");
-if (!fs.existsSync(MODELS)) {
-  fs.mkdirSync(MODELS, { recursive: true });
-}
-const LLM_MODELS = path.join(ROOT, "app", "llm-models");
-if (!fs.existsSync(LLM_MODELS)) {
-  fs.mkdirSync(LLM_MODELS, { recursive: true });
-}
-const CHAT_HISTORY = path.join(ROOT, "app", "chat-history");
-if (!fs.existsSync(CHAT_HISTORY)) {
-  fs.mkdirSync(CHAT_HISTORY, { recursive: true });
-}
+const MODELS  = ensureWritableDir(path.join(ROOT, "app", "models"), "models");
+const LLM_MODELS = ensureWritableDir(path.join(ROOT, "app", "llm-models"), "llm-models");
+const CHAT_HISTORY = ensureWritableDir(path.join(ROOT, "app", "chat-history"), "chat-history");
 const LLM_BACKEND_PATHS = {
-  winCuda: path.join(ROOT, "app", "llm-backend", "win", "cuda", "llama-server.exe"),
-  winVulkan: path.join(ROOT, "app", "llm-backend", "win", "vulkan", "llama-server.exe"),
-  winSycl: path.join(ROOT, "app", "llm-backend", "win", "sycl", "llama-server.exe"),
-  winHip: path.join(ROOT, "app", "llm-backend", "win", "hip", "llama-server.exe"),
-  winCpu: path.join(ROOT, "app", "llm-backend", "win", "cpu", "llama-server.exe"),
-  linuxCuda: path.join(ROOT, "app", "llm-backend", "linux", "cuda", "llama-server"),
-  linuxRocm: path.join(ROOT, "app", "llm-backend", "linux", "rocm", "llama-server"),
-  linuxVulkan: path.join(ROOT, "app", "llm-backend", "linux", "vulkan", "llama-server"),
-  linuxSycl: path.join(ROOT, "app", "llm-backend", "linux", "sycl", "llama-server"),
-  linuxCpu: path.join(ROOT, "app", "llm-backend", "linux", "cpu", "llama-server"),
-  macArm64: path.join(ROOT, "app", "llm-backend", "mac", "arm64", "llama-server"),
-  macX64: path.join(ROOT, "app", "llm-backend", "mac", "x64", "llama-server"),
+  winCuda: resolveBinary(path.join("llm-backend", "win", "cuda", "llama-server.exe")),
+  winVulkan: resolveBinary(path.join("llm-backend", "win", "vulkan", "llama-server.exe")),
+  winSycl: resolveBinary(path.join("llm-backend", "win", "sycl", "llama-server.exe")),
+  winHip: resolveBinary(path.join("llm-backend", "win", "hip", "llama-server.exe")),
+  winCpu: resolveBinary(path.join("llm-backend", "win", "cpu", "llama-server.exe")),
+  linuxCuda: resolveBinary(path.join("llm-backend", "linux", "cuda", "llama-server")),
+  linuxRocm: resolveBinary(path.join("llm-backend", "linux", "rocm", "llama-server")),
+  linuxVulkan: resolveBinary(path.join("llm-backend", "linux", "vulkan", "llama-server")),
+  linuxSycl: resolveBinary(path.join("llm-backend", "linux", "sycl", "llama-server")),
+  linuxCpu: resolveBinary(path.join("llm-backend", "linux", "cpu", "llama-server")),
+  macArm64: resolveBinary(path.join("llm-backend", "mac", "arm64", "llama-server")),
+  macX64: resolveBinary(path.join("llm-backend", "mac", "x64", "llama-server")),
 };
-const LLM_CONFIG_DIR = path.join(ROOT, "app", "config");
+const LLM_CONFIG_DIR = ensureWritableDir(path.join(ROOT, "app", "config"), "config");
 const LLM_MODEL_SETTINGS_PATH = path.join(LLM_CONFIG_DIR, "llm-model-settings.json");
 const LLM_BENCHMARK_PATH = path.join(LLM_CONFIG_DIR, "llm-benchmarks.json");
-if (!fs.existsSync(LLM_CONFIG_DIR)) {
-  fs.mkdirSync(LLM_CONFIG_DIR, { recursive: true });
-}
-const SPEECH_MODELS = path.join(ROOT, "app", "speech-models");
-if (!fs.existsSync(SPEECH_MODELS)) {
-  fs.mkdirSync(SPEECH_MODELS, { recursive: true });
-}
-const TRANSCRIPTIONS = path.join(ROOT, "app", "transcriptions");
-if (!fs.existsSync(TRANSCRIPTIONS)) {
-  fs.mkdirSync(TRANSCRIPTIONS, { recursive: true });
-}
-const TTS_MODELS = path.join(ROOT, "app", "tts-models");
-if (!fs.existsSync(TTS_MODELS)) {
-  fs.mkdirSync(TTS_MODELS, { recursive: true });
-}
-const TTS_OUTPUTS = path.join(ROOT, "app", "tts-outputs");
+const SPEECH_MODELS = ensureWritableDir(path.join(ROOT, "app", "speech-models"), "speech-models");
+const TRANSCRIPTIONS = ensureWritableDir(path.join(ROOT, "app", "transcriptions"), "transcriptions");
+const TTS_MODELS = ensureWritableDir(path.join(ROOT, "app", "tts-models"), "tts-models");
+const TTS_OUTPUTS = process.env.ABYX_TTS_OUTPUTS_DIR || path.join(DOCS_ABYX, "tts-outputs");
 if (!fs.existsSync(TTS_OUTPUTS)) {
-  fs.mkdirSync(TTS_OUTPUTS, { recursive: true });
+  try { fs.mkdirSync(TTS_OUTPUTS, { recursive: true }); } catch {}
 }
-const VIDEO_OUTPUTS = path.join(ROOT, "app", "video-outputs");
+const VIDEO_OUTPUTS = process.env.ABYX_VIDEO_OUTPUTS_DIR || path.join(DOCS_ABYX, "video-outputs");
 if (!fs.existsSync(VIDEO_OUTPUTS)) {
-  fs.mkdirSync(VIDEO_OUTPUTS, { recursive: true });
+  try { fs.mkdirSync(VIDEO_OUTPUTS, { recursive: true }); } catch {}
 }
-const TTS_CACHE = path.join(ROOT, "app", "tts-cache");
-if (!fs.existsSync(TTS_CACHE)) {
-  fs.mkdirSync(TTS_CACHE, { recursive: true });
-}
-const WEB_SEARCH_CACHE = path.join(ROOT, "app", "cache", "search");
-if (!fs.existsSync(WEB_SEARCH_CACHE)) {
-  fs.mkdirSync(WEB_SEARCH_CACHE, { recursive: true });
-}
-const TTS_RUNTIME = path.join(ROOT, "app", "tts-runtime");
+const TTS_CACHE = ensureWritableDir(path.join(ROOT, "app", "tts-cache"), "tts-cache");
+const WEB_SEARCH_CACHE = ensureWritableDir(path.join(ROOT, "app", "cache", "search"), "cache/search");
+const TTS_RUNTIME = resolveBinary("tts-runtime");
 const TTS_WORKER = path.join(ROOT, "scripts", "workers", "tts-kokoro-worker.mjs");
-const SPEECH_BACKEND_ROOT = path.join(ROOT, "app", "speech-backend");
+const SPEECH_BACKEND_ROOT = resolveBinary("speech-backend");
 const SPEECH_BACKEND_PATHS = {
-  winVulkanCli: path.join(SPEECH_BACKEND_ROOT, "win", "vulkan", "whisper-cli.exe"),
-  winVulkanServer: path.join(SPEECH_BACKEND_ROOT, "win", "vulkan", "whisper-server.exe"),
-  winCpuCli: path.join(SPEECH_BACKEND_ROOT, "win", "cpu", "whisper-cli.exe"),
-  winCpuServer: path.join(SPEECH_BACKEND_ROOT, "win", "cpu", "whisper-server.exe"),
-  winCli: path.join(ROOT, "app", "speech-backend", "win", "whisper-cli.exe"),
-  winServer: path.join(ROOT, "app", "speech-backend", "win", "whisper-server.exe"),
-  linuxVulkanCli: path.join(SPEECH_BACKEND_ROOT, "linux", "vulkan", "whisper-cli"),
-  linuxVulkanServer: path.join(SPEECH_BACKEND_ROOT, "linux", "vulkan", "whisper-server"),
-  linuxCpuCli: path.join(SPEECH_BACKEND_ROOT, "linux", "cpu", "whisper-cli"),
-  linuxCpuServer: path.join(SPEECH_BACKEND_ROOT, "linux", "cpu", "whisper-server"),
-  linuxCli: path.join(ROOT, "app", "speech-backend", "linux", "whisper-cli"),
-  linuxServer: path.join(ROOT, "app", "speech-backend", "linux", "whisper-server"),
-  macMetalCli: path.join(SPEECH_BACKEND_ROOT, "mac", "metal", "whisper-cli"),
-  macMetalServer: path.join(SPEECH_BACKEND_ROOT, "mac", "metal", "whisper-server"),
+  winVulkanCli: resolveBinary(path.join("speech-backend", "win", "vulkan", "whisper-cli.exe")),
+  winVulkanServer: resolveBinary(path.join("speech-backend", "win", "vulkan", "whisper-server.exe")),
+  winCpuCli: resolveBinary(path.join("speech-backend", "win", "cpu", "whisper-cli.exe")),
+  winCpuServer: resolveBinary(path.join("speech-backend", "win", "cpu", "whisper-server.exe")),
+  winCli: resolveBinary(path.join("speech-backend", "win", "whisper-cli.exe")),
+  winServer: resolveBinary(path.join("speech-backend", "win", "whisper-server.exe")),
+  linuxVulkanCli: resolveBinary(path.join("speech-backend", "linux", "vulkan", "whisper-cli")),
+  linuxVulkanServer: resolveBinary(path.join("speech-backend", "linux", "vulkan", "whisper-server")),
+  linuxCpuCli: resolveBinary(path.join("speech-backend", "linux", "cpu", "whisper-cli")),
+  linuxCpuServer: resolveBinary(path.join("speech-backend", "linux", "cpu", "whisper-server")),
+  linuxCli: resolveBinary(path.join("speech-backend", "linux", "whisper-cli")),
+  linuxServer: resolveBinary(path.join("speech-backend", "linux", "whisper-server")),
+  macMetalCli: resolveBinary(path.join("speech-backend", "mac", "metal", "whisper-cli")),
+  macMetalServer: resolveBinary(path.join("speech-backend", "mac", "metal", "whisper-server")),
   macCpuCli: path.join(SPEECH_BACKEND_ROOT, "mac", "cpu", "whisper-cli"),
   macCpuServer: path.join(SPEECH_BACKEND_ROOT, "mac", "cpu", "whisper-server"),
   macCli: path.join(ROOT, "app", "speech-backend", "mac", "whisper-cli"),
@@ -335,7 +333,7 @@ const OPENVINO_MODELS = path.join(ROOT, "app", "openvino-models");
 if (!fs.existsSync(OPENVINO_MODELS)) {
   fs.mkdirSync(OPENVINO_MODELS, { recursive: true });
 }
-const OUTPUTS = path.join(ROOT, "app", "outputs");
+const OUTPUTS = process.env.ABYX_OUTPUTS_DIR || path.join(DOCS_ABYX, "outputs");
 if (!fs.existsSync(OUTPUTS)) {
   fs.mkdirSync(OUTPUTS, { recursive: true });
 }
@@ -7304,7 +7302,7 @@ async function executeAutonomousImageGen(prompt, filename = "", activeWs = null,
 
   if (fs.existsSync(localSdCli) && chosenModel) {
     try {
-      console.log(`  [cross-model:photo] Generating image on local RTX 5060 GPU with ${path.basename(chosenModel)}...`);
+      console.log(`  [cross-model:photo] Generating image on local GPU with ${path.basename(chosenModel)}...`);
       await new Promise((resolve, reject) => {
         const { execFile } = require("child_process");
         const args = [
@@ -8518,13 +8516,36 @@ async function getLlmfitRecommendations(useCase = "chat", limit = 10) {
     }
 
     const agentMode = String(body.agentMode || 'act').toLowerCase();
+    const permissionMode = String(body.permissionMode || 'turbo').toLowerCase();
+    const thinkingEffort = String(body.thinkingEffort || 'high').toLowerCase();
+
+    if (harnessRoutes?.getAgentRuntime) {
+      try {
+        const runtime = harnessRoutes.getAgentRuntime(workspaceService, 'default');
+        if (body.permissionMode) {
+          runtime.securityEngine?.setPermissionMode?.(body.permissionMode);
+          runtime.policyEngine?.setPermissionMode?.(body.permissionMode);
+        }
+        if (body.agentMode) {
+          const modeVal = body.agentMode === 'plan' ? 'plan' : 'build';
+          runtime.securityEngine?.setMode?.(modeVal);
+          runtime.policyEngine?.setMode?.(modeVal);
+        }
+      } catch (_) {}
+    }
+
+    const permissionInstruction = permissionMode === 'turbo'
+      ? `\nPERMISSION MODE: TURBO (FULL AUTONOMY)\n- Run all operations and tool commands directly and autonomously without asking for approval.`
+      : permissionMode === 'request_review'
+      ? `\nPERMISSION MODE: REQUEST REVIEW\n- All terminal commands, code changes, and actions require user review before execution.`
+      : `\nPERMISSION MODE: DEFAULT / ASK\n- Sensitive commands require user confirmation. Safe read-only analysis runs autonomously.`;
     const modeInstruction = agentMode === 'plan'
       ? `\nAGENT MODE: PLAN ONLY\n- Formulate a structured step-by-step architecture and implementation plan.\n- Analyze requirements, edge cases, risks, and required dependencies.\n- Do NOT generate full code blocks or save files yet; focus on architectural strategy and user alignment.`
       : `\nAGENT MODE: ACT / AUTONOMOUS EXECUTION\n- Direct execution mode. Implement complete production-grade code, generate files, and configure dependencies directly in the workspace.`;
 
     const wsInstruction = `\n\n# IDENTITY & AGENT HARNESS CONTEXT:
 You are AbyxV2 9B, an autonomous senior engineer and AI agent operating inside the Abyx Agent Harness.
-Active Workspace: "${wsTargetDir}" (Project: "${activeWs?.name || 'abyx'}").${modeInstruction}
+Active Workspace: "${wsTargetDir}" (Project: "${activeWs?.name || 'abyx'}").${modeInstruction}${permissionInstruction}\nREASONING EFFORT: ${thinkingEffort.toUpperCase()}
 
 CORE OPERATIONAL RULES:
 1. CONVERSATIONAL DIRECTNESS & RESTRAINT:
@@ -8599,7 +8620,7 @@ ${skillsContext}`;
         providerName: "Local GPU",
         selectedModel: targetModel,
         selectedModelName: targetModel.replace(/\.gguf$/i, ""),
-        reason: "Executed strictly on local RTX 5060 GPU"
+        reason: "Executed strictly on local accelerator"
       };
     } else if (isAuto && aiProviders) {
       const lastUserPrompt = [...normalizedMessages].reverse().find(m => m.role === 'user')?.content || "";
@@ -8624,7 +8645,7 @@ ${skillsContext}`;
           providerName: "Local LLM",
           selectedModel: llmSettings?.model || "local-model",
           selectedModelName: (llmSettings?.model || "Local Model").replace(/\.gguf$/i, ""),
-          reason: autoDecision?.reason || "Executed on local RTX 5060 GPU"
+          reason: autoDecision?.reason || "Executed on local accelerator"
         };
       }
     }

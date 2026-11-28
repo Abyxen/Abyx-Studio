@@ -350,7 +350,7 @@ const VIDEO_MODEL_LIBRARY = [
         format: "Safetensors",
         approxSize: "4.1 GB",
         resolution: "768x512",
-        notes: "High-speed 2B Diffusion Transformer video generator by Lightricks. Fast inference on RTX 5060.",
+        notes: "High-speed 2B Diffusion Transformer video generator by Lightricks. Fast local GPU inference.",
         url: "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.1.safetensors",
         pageUrl: "https://huggingface.co/Lightricks/LTX-Video",
         recommendedTiers: ["Mid", "High"],

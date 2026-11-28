@@ -1,9 +1,9 @@
-param([string]$Release = "v1.9.1")
+param([string]$Release = "v1.9.1", [string]$AppDir = "")
 
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $rootDir = Split-Path -Parent (Split-Path -Parent $scriptDir)
-$appDir = Join-Path $rootDir "app"
+$appDir = if ($AppDir) { $AppDir } else { Join-Path $rootDir "app" }
 $toolsDir = Join-Path $appDir "tools"
 $speechWinRoot = Join-Path $appDir "speech-backend\win"
 $speechRoot = Join-Path $speechWinRoot "cpu"

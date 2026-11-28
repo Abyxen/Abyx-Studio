@@ -99,7 +99,7 @@ async function generateImage({
   const isExplicitCloud = typeof model === 'string' && (model.startsWith('cloud:') || model.startsWith('pollinations'));
   let generatedLocally = false;
 
-  // 1. Primary: Run local GPU image generation via sd-cli.exe on NVIDIA GeForce RTX 5060
+  // 1. Primary: Run local GPU image generation via sd-cli.exe on local GPU
   if (!isExplicitCloud && fs.existsSync(localSdCli) && localModel) {
     try {
       console.log(`[image_studio_service] Running local GPU generation with ${path.basename(localModel)}...`);

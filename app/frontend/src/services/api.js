@@ -481,6 +481,8 @@ export async function streamChatWithLlm(messages, options = {}, onToken = () => 
       conversationId: options.conversationId,
       model: options.model || "auto",
       agentMode: options.agentMode || "act",
+      permissionMode: options.permissionMode || "turbo",
+      thinkingEffort: options.thinkingEffort || "high",
       temperature: options.temperature,
       max_tokens: options.maxTokens,
       stream: true,

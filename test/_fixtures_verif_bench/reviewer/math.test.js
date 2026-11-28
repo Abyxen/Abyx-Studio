@@ -1,1 +1,0 @@
-const { multiply } = require("./math");

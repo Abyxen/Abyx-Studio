@@ -17,14 +17,34 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
+  <a href="#autonomous-agent-harness">Agent Harness</a> •
   <a href="#key-capabilities">Features</a> •
   <a href="#system-architecture">Architecture</a> •
   <a href="#recommended-models">Models</a> •
   <a href="#hybrid-cloud-routing">Cloud</a> •
   <a href="#configuration">Configuration</a> •
   <a href="#troubleshooting--faq">FAQ</a> •
-  <a href="#contributing">Contributing</a>
+  <a href="docs/README.md">Documentation Hub</a>
 </p>
+
+---
+
+## <a id="autonomous-agent-harness"></a>🤖 Autonomous Agent Harness & Documentation
+
+ABYX Unified AI Studio features a verified clean-room autonomous agent harness combining the capabilities of **OpenHands** and **OpenCode**:
+- **Zero-VRAM Microkernel:** The harness event loop and tool execution run strictly in system RAM (~48-76 MB), reserving 100% of GPU VRAM for local LLM inference.
+- **Model-Driven Execution:** Autonomous task decomposition, dynamic context budgeting, and verification loops.
+- **Comprehensive Tool Suite:** Terminal execution, Playwright browser automation, multi-format Python documents (PDF, DOCX, XLSX with live formulas, PPTX, ZIP), and detached daemon management.
+
+### 📚 Core Specifications & Guides
+- 🏛️ **[Unified Architecture Specification](docs/architecture/UNIFIED_ARCHITECTURE.md)** — Architectural layers, technology boundaries, hardware allocation, and data flow.
+- 🗺️ **[Unified Service Map](docs/architecture/UNIFIED_SERVICE_MAP.md)** — Comprehensive map of services, network ports (1420, 3000, 3001, 10086), and API contracts.
+- 🛠️ **[Tool Registry](docs/architecture/UNIFIED_TOOL_REGISTRY.md)** — Complete schemas, parameters, and security policies for all agent tools.
+- ⚡ **[Agent Runtime Specification](docs/architecture/AGENT_RUNTIME_SPECIFICATION.md)** — Execution loop, two-tier context budgeting, output truncation, and recovery.
+- 📊 **[Test Audit Report (87/87 PASS)](docs/reports/ABYX_TEST_REPORT.md)** — Full evidence across unit, integration, benchmark, and live-model test suites.
+- 🔍 **[Known Limitations & Guidance](docs/reports/ABYX_KNOWN_LIMITATIONS.md)** — Hardware considerations and operational guidelines.
+- 📋 **[Final Merge Report](docs/reports/FINAL_MERGE_REPORT.md)** — Executive summary of the codebase consolidation.
+- 📁 **[Full Documentation Hub](docs/README.md)** — Complete navigation of all architectural, report, and merge documentation.
 
 ---
 

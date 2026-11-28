@@ -80,6 +80,7 @@ class RuntimeController extends EventEmitter {
     provider = 'local_llama_server',
     mode = 'build',
     systemPrompt = null,
+    maxTokens = null,
     signal = null,
     onEvent = null
   }) {
@@ -92,7 +93,8 @@ class RuntimeController extends EventEmitter {
         model,
         provider,
         mode,
-        ...(systemPrompt ? { systemPrompt } : {})
+        ...(systemPrompt ? { systemPrompt } : {}),
+        ...(maxTokens ? { maxTokens } : {})
       });
     } else if (goal) {
       session.messages.push({ role: 'user', content: goal });
@@ -164,6 +166,7 @@ class RuntimeController extends EventEmitter {
           tools: dynamicCtx.tools.length > 0 ? dynamicCtx.tools : undefined,
           model: session.model,
           provider: session.provider,
+          maxTokens: maxTokens || session.maxTokens || undefined,
           signal: cancelToken.signal
         });
 
@@ -232,7 +235,7 @@ class RuntimeController extends EventEmitter {
           }
         } else {
           // Model completed answer
-          finalAnswer = message.content;
+          finalAnswer = (message.content && message.content.trim()) || (message.reasoning_content && message.reasoning_content.trim()) || 'Task completed';
           completed = true;
 
           session.messages.push({

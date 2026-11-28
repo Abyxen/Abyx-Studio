@@ -1,0 +1,36 @@
+{
+  "id": "chat_1795532678329",
+  "title": "hi",
+  "model": "AbyxV2 9B.gguf",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hi"
+    },
+    {
+      "role": "assistant",
+      "content": "Hey! What are we working on today?",
+      "reasoning": "The user is giving me a casual greeting. According to my core operational rules, I should respond casually and briefly in one sentence for greetings like \"yoo\", \"hey\", or \"hi\".\n\nI also need to remember the ZERO EMOJI MANDATE - no emojis in responses.\n\nLet me craft a brief, direct response that fits this rule.",
+      "thinkingDuration": 2.2660999999940397,
+      "generationStats": {
+        "status": "complete",
+        "tokens": 86,
+        "tokensPerSecond": 23.75422371057183,
+        "seconds": 3.868687,
+        "finishReason": "stop",
+        "truncated": false
+      },
+      "routedModel": {
+        "providerId": "local",
+        "providerName": "Local GPU",
+        "selectedModel": "AbyxV2 9B.gguf",
+        "selectedModelName": "AbyxV2 9B",
+        "reason": "Executed strictly on local RTX 5060 GPU"
+      },
+      "webSources": []
+    }
+  ],
+  "timestamp": 1795532682223,
+  "createdAt": "2026-11-24T15:04:42.223Z",
+  "updatedAt": "2026-11-24T15:04:42.227Z"
+}

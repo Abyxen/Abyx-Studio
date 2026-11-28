@@ -1,0 +1,14 @@
+{
+  "id": "chat_1795522856371",
+  "title": "SVG of NEW YORK SKYLINE Use whatever libraries to get this done but make sure I ",
+  "model": "AbyxV2 9B.gguf",
+  "messages": [
+    {
+      "role": "user",
+      "content": "SVG of NEW YORK SKYLINE Use whatever libraries to get this done but make sure I can paste it all into a single HTML file and open it in Chrome.make it interesting and highly detail , shows details that no one expected go full creative and full beauty in one code block small website like s prototype"
+    }
+  ],
+  "timestamp": 1795522856372,
+  "createdAt": "2026-11-24T12:20:56.372Z",
+  "updatedAt": "2026-11-24T12:20:56.422Z"
+}

@@ -12,6 +12,10 @@ import {
   downloadBackend,
   getDownloadProgress,
   getBackendOptions,
+  getHarnessRuntimeConfig,
+  updateHarnessRuntimeConfig,
+  getSecurityStatus,
+  setSecurityMode,
 } from "../services/api";
 import { THEMES } from "../themes";
 import CloudProviders from "./CloudProviders";
@@ -28,6 +32,7 @@ const ASPECT_RATIOS = [
 
 const SECTIONS = [
   { id: "appearance", label: "Appearance" },
+  { id: "agent", label: "Agent & Studio" },
   { id: "image", label: "Image generation" },
   { id: "text", label: "Text generation" },
   { id: "speech", label: "Speech" },
@@ -236,6 +241,61 @@ function Settings({
     speed: "",
     error: null,
   });
+
+  const [harnessConfig, setHarnessConfig] = useState({
+    performanceProfile: "balanced",
+    autonomousMaxSteps: 15,
+    operatingMode: "build",
+    preferredBackend: "cuda",
+    gpuLayers: -1,
+    contextSize: 4096,
+    threads: 8,
+    allowTerminal: true,
+    allowBrowser: true,
+    allowOfficeGen: true,
+  });
+  const [securityStatus, setSecurityStatus] = useState({ permissionMode: "ask" });
+
+  useEffect(() => {
+    let mounted = true;
+    const loadHarnessData = async () => {
+      try {
+        const [hConfig, sec] = await Promise.all([
+          getHarnessRuntimeConfig().catch(() => null),
+          getSecurityStatus().catch(() => null),
+        ]);
+        if (!mounted) return;
+        if (hConfig && hConfig.ok) {
+          setHarnessConfig((prev) => ({ ...prev, ...hConfig }));
+        }
+        if (sec && sec.ok && sec.status) {
+          setSecurityStatus(sec.status);
+        }
+      } catch (_) {}
+    };
+    loadHarnessData();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleUpdatePermissionMode = async (mode) => {
+    setSecurityStatus((prev) => ({ ...prev, permissionMode: mode }));
+    try {
+      await setSecurityMode({ permissionMode: mode });
+    } catch (err) {
+      console.warn("Failed to update permission mode:", err);
+    }
+  };
+
+  const handleUpdateHarnessSetting = async (key, val) => {
+    setHarnessConfig((prev) => ({ ...prev, [key]: val }));
+    try {
+      await updateHarnessRuntimeConfig({ [key]: val });
+    } catch (err) {
+      console.warn("Failed to update harness setting:", err);
+    }
+  };
 
   const [pendingTextSettings, setPendingTextSettings] = useState(textSettings || {});
 
@@ -1266,8 +1326,234 @@ function Settings({
     </>
   );
 
+  // ─── Agent & Studio Settings ───
+  const renderAgentStudioSettings = () => {
+    const PERMISSION_OPTIONS = [
+      { id: "turbo", label: "Autonomous (Turbo)", desc: "Auto-executes safe tools, file actions, and builds without pausing." },
+      { id: "approve for me", label: "Smart Semi-Auto", desc: "Auto-approves safe commands, requests permission for risky changes." },
+      { id: "ask", label: "Ask Every Time", desc: "Explicitly prompts for user approval before every tool invocation." },
+    ];
+
+    const MODE_OPTIONS = [
+      { id: "build", label: "Build Mode (Full Execution)", desc: "Allows full autonomous code creation, editing files, terminal runs, and testing." },
+      { id: "plan", label: "Plan Mode (Read-Only Analysis)", desc: "Explores repository, designs architecture, and plans without modifying files." },
+    ];
+
+    const PROFILE_OPTIONS = [
+      { id: "potato", label: "Potato (CPU/Low RAM)" },
+      { id: "balanced", label: "Balanced (Default)" },
+      { id: "high", label: "High Performance (Dedicated GPU)" },
+    ];
+
+    const BACKEND_OPTIONS = [
+      { id: "cuda", label: "NVIDIA CUDA (RTX GPUs)" },
+      { id: "vulkan", label: "Vulkan GPU (AMD / Intel / Universal)" },
+      { id: "cpu", label: "CPU Fallback (Pure AVX2)" },
+    ];
+
+    const CTX_OPTIONS = [
+      { id: 2048, label: "2048 tokens" },
+      { id: 4096, label: "4096 tokens" },
+      { id: 8192, label: "8192 tokens" },
+      { id: 16384, label: "16384 tokens" },
+    ];
+
+    const permissionMode = securityStatus?.permissionMode || "ask";
+    const opMode = harnessConfig?.operatingMode || "build";
+    const steps = harnessConfig?.autonomousMaxSteps || 15;
+    const profile = harnessConfig?.performanceProfile || "balanced";
+    const backend = harnessConfig?.preferredBackend || "cuda";
+    const ctx = harnessConfig?.contextSize || 4096;
+
+    return (
+      <>
+        <div className="page-section-label settings-group-label">Autonomous Execution & Security</div>
+        <ul className="row-list">
+          <SettingRow
+            title="Permission mode"
+            description="Controls how autonomously the AI agent executes actions and tools"
+            wide={true}
+          >
+            <div className="settings-choice-group" style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%", marginTop: "8px" }}>
+              {PERMISSION_OPTIONS.map((opt) => {
+                const selected = permissionMode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`settings-agent-mode-card ${selected ? "active" : ""}`}
+                    onClick={() => handleUpdatePermissionMode(opt.id)}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      padding: "12px 16px",
+                      borderRadius: "8px",
+                      border: selected ? "1px solid var(--accent, #6366f1)" : "1px solid var(--border-subtle, rgba(255,255,255,0.1))",
+                      background: selected ? "var(--accent-subtle, rgba(99,102,241,0.12))" : "var(--bg-card, rgba(255,255,255,0.03))",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      color: "inherit"
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", width: "100%", fontWeight: 600, fontSize: "14px" }}>
+                      <span>{opt.label}</span>
+                      {selected && <Check size={16} color="var(--accent, #6366f1)" />}
+                    </div>
+                    <div style={{ fontSize: "12px", opacity: 0.75, marginTop: "4px" }}>{opt.desc}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </SettingRow>
+
+          <SettingRow
+            title="Operating mode"
+            description="Select whether the agent executes modifications or operates in plan-only mode"
+          >
+            <Choice
+              label="Operating mode"
+              options={MODE_OPTIONS.map(m => ({ id: m.id, label: m.id === "build" ? "Build" : "Plan" }))}
+              value={opMode}
+              onSelect={(val) => handleUpdateHarnessSetting("operatingMode", val)}
+            />
+          </SettingRow>
+
+          <SettingRow
+            title="Max autonomous steps"
+            description="Maximum consecutive tool iterations per task before returning control"
+          >
+            <Slider
+              label="Max autonomous steps"
+              value={steps}
+              min={1}
+              max={50}
+              step={1}
+              display={`${steps} steps`}
+              onChange={(e) => handleUpdateHarnessSetting("autonomousMaxSteps", parseInt(e.target.value, 10))}
+            />
+          </SettingRow>
+        </ul>
+
+        <div className="page-section-label settings-group-label">Storage & Working Directories</div>
+        <ul className="row-list">
+          <SettingRow
+            title="Outputs folder"
+            description="Generated files, PDFs, spreadsheets, presentations, images, audio, and code packages"
+          >
+            <span style={{ fontSize: "13px", fontFamily: "monospace", opacity: 0.9, background: "rgba(0,0,0,0.25)", padding: "4px 8px", borderRadius: "4px" }}>
+              Documents/.abyx/outputs
+            </span>
+          </SettingRow>
+
+          <SettingRow
+            title="Sandboxed workspace"
+            description="Isolated workspace root used for multi-file code editing, git actions, and builds"
+          >
+            <span style={{ fontSize: "13px", fontFamily: "monospace", opacity: 0.9, background: "rgba(0,0,0,0.25)", padding: "4px 8px", borderRadius: "4px" }}>
+              Documents/.abyx/workspace
+            </span>
+          </SettingRow>
+
+          <SettingRow
+            title="Persistent data & memory"
+            description="Local SQLite database, vector memory store, and conversation histories"
+          >
+            <span style={{ fontSize: "13px", fontFamily: "monospace", opacity: 0.9, background: "rgba(0,0,0,0.25)", padding: "4px 8px", borderRadius: "4px" }}>
+              Documents/.abyx/data
+            </span>
+          </SettingRow>
+        </ul>
+
+        <div className="page-section-label settings-group-label">Agent Capabilities & Sandboxed Tools</div>
+        <ul className="row-list">
+          <SettingRow
+            title="Terminal execution"
+            description="Allows agent to run build tools, package managers, and test commands within workspace"
+          >
+            <Switch
+              label="Terminal execution"
+              checked={harnessConfig?.allowTerminal !== false}
+              onChange={(val) => handleUpdateHarnessSetting("allowTerminal", val)}
+            />
+          </SettingRow>
+
+          <SettingRow
+            title="Controlled web research"
+            description="Allows agent to browse documentation, fetch online assets, and research answers"
+          >
+            <Switch
+              label="Controlled web research"
+              checked={harnessConfig?.allowBrowser !== false}
+              onChange={(val) => handleUpdateHarnessSetting("allowBrowser", val)}
+            />
+          </SettingRow>
+
+          <SettingRow
+            title="Universal document creation"
+            description="Production-grade generation of PDF, DOCX, XLSX, PPTX, CSV, JSON, and ZIP archives"
+          >
+            <Switch
+              label="Universal document creation"
+              checked={harnessConfig?.allowOfficeGen !== false}
+              onChange={(val) => handleUpdateHarnessSetting("allowOfficeGen", val)}
+            />
+          </SettingRow>
+        </ul>
+
+        <div className="page-section-label settings-group-label">Hardware Acceleration & Inference Engine</div>
+        <ul className="row-list">
+          <SettingRow
+            title="Performance profile"
+            description="Preset tuning for memory, context size, and compute hardware"
+          >
+            <Choice
+              label="Performance profile"
+              options={PROFILE_OPTIONS}
+              value={profile}
+              onSelect={(val) => handleUpdateHarnessSetting("performanceProfile", val)}
+            />
+          </SettingRow>
+
+          <SettingRow
+            title="Preferred acceleration"
+            description="Hardware execution backend for local llama.cpp text engine"
+            htmlFor="settings-agent-backend"
+          >
+            <Select
+              id="settings-agent-backend"
+              value={backend}
+              onChange={(e) => handleUpdateHarnessSetting("preferredBackend", e.target.value)}
+            >
+              {BACKEND_OPTIONS.map((b) => (
+                <option key={b.id} value={b.id}>{b.label}</option>
+              ))}
+            </Select>
+          </SettingRow>
+
+          <SettingRow
+            title="Context window"
+            description="Token capacity for agent planning, code files, and reasoning scratchpad"
+            htmlFor="settings-agent-ctx"
+          >
+            <Select
+              id="settings-agent-ctx"
+              value={ctx}
+              onChange={(e) => handleUpdateHarnessSetting("contextSize", parseInt(e.target.value, 10))}
+            >
+              {CTX_OPTIONS.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </Select>
+          </SettingRow>
+        </ul>
+      </>
+    );
+  };
+
   const renderSection = () => {
     switch (activeSection) {
+      case "agent": return renderAgentStudioSettings();
       case "image": return renderImageSettings();
       case "text": return renderTextSettings();
       case "speech": return renderSpeechSettings();

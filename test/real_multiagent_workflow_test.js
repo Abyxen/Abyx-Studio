@@ -61,11 +61,11 @@ test('Real Model E2E: Multi-Agent Workflow on AbyxV2 9B (port 10086)', async (t)
   const durationSec = ((Date.now() - startTime) / 1000).toFixed(2);
   console.log(`Live inference completed in ${durationSec}s. Total tasks: ${report.totalTasks}`);
 
-  assert.strictEqual(report.status, 'success');
+  assert.strictEqual(report.status, 'requires_verification');
   assert.strictEqual(report.completedTasks, 2);
   assert.ok(events.some(e => e.type === 'orchestration:start'));
   assert.ok(events.some(e => e.type === 'task:start'));
-  assert.ok(events.some(e => e.type === 'task:complete'));
+  assert.ok(events.some(e => e.type === 'task:unverified'));
   assert.ok(events.some(e => e.type === 'orchestration:done'));
 
   const completedArch = report.tasks.find(t => t.id === 'task_arch');

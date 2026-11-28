@@ -9,6 +9,44 @@ test('Frontend Integration: HarnessService and API Endpoints Contract', async (t
   const root = path.join(__dirname, '..');
   const serverUrl = 'http://127.0.0.1:1420';
 
+  let serverProc = null;
+
+  t.before(async () => {
+    try {
+      const ping = await fetch(`${serverUrl}/api/orchestrator/agents`, { signal: AbortSignal.timeout(1000) });
+      if (ping.ok) return;
+    } catch (_) {}
+
+    const { spawn } = require('node:child_process');
+    serverProc = spawn(process.execPath, ['--experimental-sqlite', path.join(root, 'scripts', 'server', 'serve.cjs')], {
+      cwd: root,
+      env: { ...process.env, PORT: '1420', FRONTEND_PORT: '1420' },
+      stdio: 'ignore'
+    });
+
+    const start = Date.now();
+    while (Date.now() - start < 15000) {
+      try {
+        const ping = await fetch(`${serverUrl}/api/orchestrator/agents`, { signal: AbortSignal.timeout(500) });
+        if (ping.ok) break;
+      } catch (_) {
+        await new Promise(r => setTimeout(r, 250));
+      }
+    }
+  });
+
+  t.after(async () => {
+    if (serverProc) {
+      try {
+        if (process.platform === 'win32' && serverProc.pid) {
+          require('node:child_process').execSync(`taskkill /F /T /PID ${serverProc.pid}`, { stdio: 'ignore' });
+        } else {
+          serverProc.kill('SIGTERM');
+        }
+      } catch (_) {}
+    }
+  });
+
   // 1. Specialized Agents API
   await t.test('GET /api/orchestrator/agents returns 15 specialized agents', async () => {
     const res = await fetch(`${serverUrl}/api/orchestrator/agents`);

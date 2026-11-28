@@ -83,8 +83,125 @@ function killServerTree() {
   serverProcess = null;
 }
 
+function getUserAppDir() {
+  const docsDir = app.getPath('documents');
+  return path.join(docsDir, '.abyx', 'app');
+}
+
+function checkMissingDependencies() {
+  const missing = [];
+  const userAppDir = getUserAppDir();
+
+  const nodeExeCandidates = [
+    path.join(ROOT, 'app', 'tools', 'node-win', 'node.exe'),
+    path.join(userAppDir, 'tools', 'node-win', 'node.exe')
+  ];
+  const distHtmlCandidates = [
+    path.join(ROOT, 'app', 'dist', 'index.html'),
+    path.join(userAppDir, 'dist', 'index.html')
+  ];
+  const serveCjsCandidates = [
+    path.join(ROOT, 'scripts', 'server', 'serve.cjs'),
+    path.join(userAppDir, 'scripts', 'server', 'serve.cjs')
+  ];
+
+  const llmBackends = [
+    path.join(ROOT, 'app', 'llm-backend', 'win', 'cuda', 'llama-server.exe'),
+    path.join(ROOT, 'app', 'llm-backend', 'win', 'hip', 'llama-server.exe'),
+    path.join(ROOT, 'app', 'llm-backend', 'win', 'vulkan', 'llama-server.exe'),
+    path.join(ROOT, 'app', 'llm-backend', 'win', 'sycl', 'llama-server.exe'),
+    path.join(ROOT, 'app', 'llm-backend', 'win', 'cpu', 'llama-server.exe'),
+    path.join(userAppDir, 'llm-backend', 'win', 'cuda', 'llama-server.exe'),
+    path.join(userAppDir, 'llm-backend', 'win', 'hip', 'llama-server.exe'),
+    path.join(userAppDir, 'llm-backend', 'win', 'vulkan', 'llama-server.exe'),
+    path.join(userAppDir, 'llm-backend', 'win', 'sycl', 'llama-server.exe'),
+    path.join(userAppDir, 'llm-backend', 'win', 'cpu', 'llama-server.exe')
+  ];
+
+  const hasLlmBackend = llmBackends.some(p => fs.existsSync(p));
+  const hasSdBackend = fs.existsSync(path.join(ROOT, 'app', 'backend', 'win', 'cuda', 'sd-cuda.exe')) ||
+                       fs.existsSync(path.join(ROOT, 'app', 'backend', 'win', 'vulkan', 'sd-vulkan.exe')) ||
+                       fs.existsSync(path.join(ROOT, 'app', 'backend', 'win', 'cpu', 'sd-cpu.exe')) ||
+                       fs.existsSync(path.join(userAppDir, 'backend', 'win', 'cuda', 'sd-cuda.exe')) ||
+                       fs.existsSync(path.join(userAppDir, 'backend', 'win', 'vulkan', 'sd-vulkan.exe')) ||
+                       fs.existsSync(path.join(userAppDir, 'backend', 'win', 'cpu', 'sd-cpu.exe'));
+
+  const hasSpeechBackend = fs.existsSync(path.join(ROOT, 'app', 'speech-backend', 'win', 'cpu', 'whisper-cli.exe')) ||
+                           fs.existsSync(path.join(userAppDir, 'speech-backend', 'win', 'cpu', 'whisper-cli.exe'));
+
+  const hasTtsRuntime = fs.existsSync(path.join(ROOT, 'app', 'tts-runtime', 'node_modules', 'kokoro-js')) ||
+                        fs.existsSync(path.join(userAppDir, 'tts-runtime', 'node_modules', 'kokoro-js'));
+
+  if (!nodeExeCandidates.some(p => fs.existsSync(p))) missing.push('Portable Node.js runtime');
+  if (!distHtmlCandidates.some(p => fs.existsSync(p))) missing.push('Frontend distribution build');
+  if (!serveCjsCandidates.some(p => fs.existsSync(p))) missing.push('Server entrypoint script');
+  if (!hasLlmBackend) missing.push('llama.cpp text inference backend');
+  if (!hasSpeechBackend) missing.push('whisper.cpp speech backend');
+  if (!hasTtsRuntime) missing.push('Kokoro text-to-speech runtime');
+  if (!hasSdBackend) missing.push('stable-diffusion image backend');
+
+  return missing;
+}
+
+async function runSetupScript(missingReasons) {
+  const setupScript = path.join(ROOT, 'scripts', 'setup', 'setup.ps1');
+  if (!fs.existsSync(setupScript)) {
+    throw new Error(`Setup script not found at: ${setupScript}`);
+  }
+
+  const userAppDir = getUserAppDir();
+  const targetAppDir = isWritableDir(ROOT) ? path.join(ROOT, 'app') : userAppDir;
+
+  console.log(`[abyx-electron] Missing dependencies detected: ${missingReasons.join(', ')}. Launching autonomous background setup into ${targetAppDir}...`);
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.executeJavaScript(`
+      const p = document.querySelector('p');
+      if (p) p.innerText = 'Downloading and installing AI components in background... please wait.';
+    `).catch(() => {});
+  }
+
+  return new Promise((resolve, reject) => {
+    const ps = spawn('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle', 'Hidden',
+      '-ExecutionPolicy', 'Bypass',
+      '-Command',
+      `& '${setupScript}' -Autonomous -TargetAppDir '${targetAppDir}'; exit $LASTEXITCODE`
+    ], {
+      cwd: ROOT,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stdoutData = '';
+    let stderrData = '';
+    if (ps.stdout) ps.stdout.on('data', d => { stdoutData += d.toString(); });
+    if (ps.stderr) ps.stderr.on('data', d => { stderrData += d.toString(); });
+
+    ps.on('close', (code) => {
+      const stillMissing = checkMissingDependencies();
+      if (stillMissing.length > 0) {
+        const errorDetails = stderrData.trim() || stdoutData.trim();
+        reject(new Error(`Setup exited with code ${code}. Still missing: ${stillMissing.join(', ')}${errorDetails ? `\nDetails: ${errorDetails.slice(-300)}` : ''}`));
+      } else {
+        resolve();
+      }
+    });
+
+    ps.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
+
 async function startBackendServer() {
-  const nodeExe = path.join(ROOT, 'app', 'tools', 'node-win', 'node.exe');
+  const userAppDir = getUserAppDir();
+  let nodeExe = path.join(ROOT, 'app', 'tools', 'node-win', 'node.exe');
+  if (!fs.existsSync(nodeExe)) {
+    nodeExe = path.join(userAppDir, 'tools', 'node-win', 'node.exe');
+  }
   const serveCjs = path.join(ROOT, 'scripts', 'server', 'serve.cjs');
 
   if (!fs.existsSync(nodeExe)) {
@@ -96,16 +213,17 @@ async function startBackendServer() {
 
   activePort = await resolvePort(1420);
 
-  const rootWritable = isWritableDir(ROOT);
-  const dataDir = rootWritable
-    ? path.join(ROOT, 'app', 'data')
-    : path.join(app.getPath('userData'), 'data');
-  const workspaceDir = rootWritable
-    ? path.join(ROOT, 'app', 'workspace')
-    : path.join(app.getPath('documents'), 'ABYX Workspace');
+  const docsDir = app.getPath('documents');
+  const docsAbyx = path.join(docsDir, '.abyx');
+  const dataDir = path.join(docsAbyx, 'data');
+  const workspaceDir = path.join(docsAbyx, 'workspace');
+  const outputsDir = path.join(docsAbyx, 'outputs');
+  const ttsOutputsDir = path.join(docsAbyx, 'tts-outputs');
+  const videoOutputsDir = path.join(docsAbyx, 'video-outputs');
 
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-  if (!fs.existsSync(workspaceDir)) fs.mkdirSync(workspaceDir, { recursive: true });
+  [docsAbyx, dataDir, workspaceDir, outputsDir, ttsOutputsDir, videoOutputsDir].forEach((d) => {
+    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+  });
 
   const env = {
     ...process.env,
@@ -113,6 +231,9 @@ async function startBackendServer() {
     PORT: String(activePort),
     ABYX_DATA_DIR: dataDir,
     ABYX_WORKSPACE_DIR: workspaceDir,
+    ABYX_OUTPUTS_DIR: outputsDir,
+    ABYX_TTS_OUTPUTS_DIR: ttsOutputsDir,
+    ABYX_VIDEO_OUTPUTS_DIR: videoOutputsDir,
     ELECTRON_APP: '1'
   };
 
@@ -192,6 +313,11 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     createWindow();
     try {
+      const missing = checkMissingDependencies();
+      if (missing.length > 0) {
+        console.log(`[abyx-electron] Missing portable dependencies: ${missing.join(', ')}`);
+        await runSetupScript(missing);
+      }
       await startBackendServer();
       if (mainWindow && !mainWindow.isDestroyed()) {
         await mainWindow.loadURL(`http://127.0.0.1:${activePort}`);

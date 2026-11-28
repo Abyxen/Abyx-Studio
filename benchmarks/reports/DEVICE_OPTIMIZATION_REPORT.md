@@ -1,6 +1,6 @@
 # ABYX Device Optimization Report
 
-Generated: 2026-11-26T01:17:54.338Z
+Generated: 2026-11-26T10:34:35.905Z
 
 ## Hardware Summary
 
@@ -9,11 +9,11 @@ Generated: 2026-11-26T01:17:54.338Z
 | CPU | AMD Ryzen 9 8940HX with Radeon Graphics         |
 | CPU Cores | 32 |
 | Total RAM | 31.05 GB |
-| Used RAM | 17.67 GB |
+| Used RAM | 17.99 GB |
 | GPU | NVIDIA GeForce RTX 5060 Laptop GPU |
 | VRAM Total | 8151 MiB |
-| VRAM Used | 5946 MiB |
-| GPU Temp | 50.47 C |
+| VRAM Used | 5530 MiB |
+| GPU Temp | 55.5 C |
 
 ## Optimizations Applied
 
@@ -37,9 +37,9 @@ Generated: 2026-11-26T01:17:54.338Z
 | KV Cache | q4_0 (flash attn enabled) |
 | GPU Layers | -1 (all offloaded) |
 | Inference Queue Concurrency | 1 (serialized, prevents VRAM thrashing) |
-| End-to-End Inference Request | 822 ms |
-| VRAM at measurement | 5946 MiB used / 8151 MiB total |
-| Free VRAM | 1954 MiB |
+| End-to-End Inference Request | 436 ms |
+| VRAM at measurement | 5530 MiB used / 8151 MiB total |
+| Free VRAM | 2370 MiB |
 
 ## Queue Status
 ```json
@@ -60,10 +60,10 @@ Generated: 2026-11-26T01:17:54.338Z
 ## Token Metrics (Session)
 ```json
 {
-  "promptTokens": 290,
-  "completionTokens": 35,
-  "totalTokens": 325,
-  "callsCount": 4,
+  "promptTokens": 759,
+  "completionTokens": 190,
+  "totalTokens": 949,
+  "callsCount": 5,
   "totalDurationMs": 0
 }
 ```

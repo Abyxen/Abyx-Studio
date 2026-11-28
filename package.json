@@ -3,8 +3,15 @@
   "version": "1.0.0",
   "description": "ABYX Unified AI Studio - Standalone Electron Desktop Application",
   "main": "electron/main.js",
+  "bin": {
+    "abyx": "bin/abyx.js"
+  },
   "scripts": {
     "start": "electron .",
+    "gateway": "node bin/abyx.js start",
+    "run": "node bin/abyx.js run",
+    "test": "node --test test/*.test.js",
+    "validate": "node scripts/validate.cjs",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis"
   },
@@ -49,6 +56,14 @@
         "to": "automations"
       },
       {
+        "from": "harness",
+        "to": "harness"
+      },
+      {
+        "from": "skills",
+        "to": "skills"
+      },
+      {
         "from": "scripts",
         "to": "scripts",
         "filter": [
@@ -83,6 +98,18 @@
       {
         "from": "app/config",
         "to": "app/config"
+      },
+      {
+        "from": "app/speech-backend",
+        "to": "app/speech-backend"
+      },
+      {
+        "from": "Abyx.bat",
+        "to": "Abyx.bat"
+      },
+      {
+        "from": "windows.bat",
+        "to": "windows.bat"
       }
     ],
     "win": {
@@ -98,6 +125,7 @@
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
@@ -106,6 +134,10 @@
       "uninstallerIcon": "abyx.ico",
       "artifactName": "ABYX-Setup-${version}.exe"
     }
+  },
+  "dependencies": {
+    "playwright": "^1.65.1",
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "electron": "^45.5.0",

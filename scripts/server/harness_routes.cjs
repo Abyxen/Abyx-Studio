@@ -807,12 +807,20 @@ async function handleHarnessRoutes(req, res, { workspaceService, aiProviders, db
       const runtime = getAgentRuntime(workspaceService, profileId);
       let resolved = false;
       if (runtime.securityEngine) {
-        resolved = runtime.securityEngine.resolveApproval(body.approvalId, body.approved, body.reason || "", body.persist || false);
+        try {
+          resolved = runtime.securityEngine.resolveApproval(body.approvalId, body.approved, body.reason || "", body.persist || false);
+        } catch (_) {
+          resolved = false;
+        }
       }
       if (!resolved && runtime.policyEngine) {
-        resolved = runtime.policyEngine.resolveApproval(body.approvalId, body.approved, body.reason || "");
+        try {
+          resolved = runtime.policyEngine.resolveApproval(body.approvalId, body.approved, body.reason || "");
+        } catch (_) {
+          resolved = false;
+        }
       }
-      return json(res, 200, { ok: true, resolved });
+      return json(res, 200, { ok: true, resolved: Boolean(resolved) });
     } catch (err) {
       return json(res, 400, { ok: false, error: err.message });
     }
@@ -1502,13 +1510,25 @@ Rules:
 
     if (isLocalProtocol || isRelativeLocalAsset) {
       const isExplicitLocal = isLocalProtocol;
-      const cleanRel = targetUrl.replace(/^local:\/\//, "").split("?")[0].replace(/^[/\\]+/, "").replace(/\.\./g, "");
+      const rawRel = targetUrl.replace(/^local:\/\//, "").split("?")[0].replace(/^[/\\]+/, "");
+      if (rawRel.includes("..") || /[\0\r\n]/.test(rawRel)) {
+        res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Access denied: Path traversal detected");
+        return true;
+      }
+      const cleanRel = rawRel;
       const runtime = getAgentRuntime(workspaceService, profileId);
       try {
         let safePath = null;
         try {
           safePath = runtime.pathGuard.resolveSafePath(cleanRel);
-        } catch (_) {}
+        } catch (guardErr) {
+          if (guardErr.message && /security/i.test(guardErr.message)) {
+            res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("Access denied: " + guardErr.message);
+            return true;
+          }
+        }
 
         if (!safePath || !fs.existsSync(safePath) || !fs.statSync(safePath).isFile()) {
           const wsDir = (workspaceService?.getActiveWorkspace ? workspaceService.getActiveWorkspace()?.path : null) || path.join(__dirname, "..", "..", "app", "workspace", "abyx");

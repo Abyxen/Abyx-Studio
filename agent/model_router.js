@@ -96,7 +96,7 @@ class ModelRouter {
     this.defaultModel = options.defaultModel || 'AbyxV2 9B.gguf';
     this.timeoutMs = options.timeoutMs || 240000; // 4 min timeout for deep reasoning
 
-    // Hardware-aware inference queues (1 serialized for RTX 5060, 4 for cloud)
+    // Hardware-aware inference queues (1 serialized for local GPU, 4 for cloud)
     this.localQueue = new InferenceQueue(options.localConcurrency || 1);
     this.cloudQueue = new InferenceQueue(options.cloudConcurrency || 4);
 
@@ -609,7 +609,7 @@ class ModelRouter {
 
     return {
       cpu: {
-        model: cpus[0]?.model || 'AMD Ryzen 9 8940HX',
+        model: cpus[0]?.model || 'Local Processor',
         cores: cpus.length,
         architecture: os.arch()
       },

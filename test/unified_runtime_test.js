@@ -15,7 +15,36 @@ const {
   RuntimeController
 } = require('../agent');
 
+async function ensureLocalServerRunning() {
+  try {
+    const res = await fetch('http://127.0.0.1:10086/health', { signal: AbortSignal.timeout(1000) });
+    if (res.ok) return true;
+  } catch (_) {}
+
+  const exePath = path.join(process.cwd(), 'app', 'llm-backend', 'win', 'cuda', 'llama-server.exe');
+  const modelPath = path.join(process.cwd(), 'app', 'llm-models', 'AbyxV2 9B.gguf');
+  if (fs.existsSync(exePath) && fs.existsSync(modelPath)) {
+    const { spawn } = require('child_process');
+    spawn(exePath, ['-m', modelPath, '--host', '127.0.0.1', '--port', '10086', '-ngl', '99', '-c', '32768'], {
+      detached: true,
+      stdio: 'ignore'
+    }).unref();
+
+    const start = Date.now();
+    while (Date.now() - start < 15000) {
+      try {
+        const ping = await fetch('http://127.0.0.1:10086/health', { signal: AbortSignal.timeout(500) });
+        if (ping.ok) return true;
+      } catch (_) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+  }
+  return false;
+}
+
 test('ProviderRegistry catalogs local and cloud providers with capability detection', async () => {
+  await ensureLocalServerRunning();
   const registry = new ProviderRegistry({ localEndpoint: 'http://127.0.0.1:10086' });
   const providers = registry.listProviders();
   assert.ok(providers.length >= 6);
@@ -196,13 +225,16 @@ test('Live Model E2E: RuntimeController executes genuine session on AbyxV2 9B (p
     policyEngine: engine.policyEngine
   });
 
+  engine.policyEngine.setPolicy('read_file', 'allow');
+
   const events = [];
   const startTime = Date.now();
 
   const res = await rc.runSession({
     sessionId: `live_sess_${Date.now()}`,
-    goal: 'In exactly 1 concise sentence, what is the role of an agent runtime controller?',
+    goal: 'Use the read_file tool to read package.json and report the name field.',
     model: 'AbyxV2 9B.gguf',
+    maxTokens: 250,
     onEvent: (type, data) => events.push(type)
   });
 
@@ -211,9 +243,12 @@ test('Live Model E2E: RuntimeController executes genuine session on AbyxV2 9B (p
   console.log(`Model Result: ${res.result}`);
 
   assert.strictEqual(res.ok, true);
-  assert.ok(res.result && res.result.length > 10);
+  assert.ok(res.result && res.result.includes('abyx'));
+  assert.strictEqual(res.turnsCount, 2);
   assert.ok(events.includes('session:start'));
   assert.ok(events.includes('turn:start'));
+  assert.ok(events.includes('tool:call:requested'));
+  assert.ok(events.includes('tool:call:result'));
   assert.ok(events.includes('turn:end'));
   assert.ok(events.includes('session:completed'));
 

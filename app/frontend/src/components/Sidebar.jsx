@@ -320,16 +320,14 @@ function Sidebar({
   ]);
 
   const navItems = [
-    { tab: "harness", label: "Agent Studio", Icon: Cpu },
     { tab: "generator", label: "Images", Icon: Image },
-    { tab: "video", label: "Video", Icon: Film },
     { tab: "speech", label: "Transcribe", Icon: Mic },
     { tab: "tts", label: "Voice", Icon: AudioLines },
     { tab: "models", label: "Models", Icon: Box },
   ];
 
   const isNewChatActive = activeTab === "chat" && !activeConversationId;
-  const deviceName = specs.gpu_name && !specs.gpu_name.startsWith("Loading") ? specs.gpu_name : specs.cpu_name;
+  const deviceName = "Local System";
   const hasResults = sections.some((section) => section.items.length > 0);
 
   return (
@@ -452,11 +450,11 @@ function Sidebar({
           <Settings size={20} aria-hidden="true" />
           <span>Settings</span>
         </div>
-        <div className="sidebar-device" title={`${specs.cpu_name} · ${specs.gpu_name} · ${specs.os_name}`}>
+        <div className="sidebar-device" title="Local System · Workspace Host">
           <span className="sidebar-device-avatar" aria-hidden="true">
-            {(deviceName || "PC").replace(/^Apple\s+/i, "").slice(0, 2).toUpperCase()}
+            LS
           </span>
-          <span className="sidebar-device-name">{deviceName}</span>
+          <span className="sidebar-device-name">Local System</span>
           <span className="sidebar-device-stats">
             {formatGb(telemetry?.ram_used_gb)}/{formatGb(telemetry?.ram_total_gb || specs.ram_total_gb)} GB
           </span>

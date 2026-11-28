@@ -5,7 +5,7 @@ import {
   PanelLeft, Volume2, RotateCcw, ThumbsUp, ThumbsDown, Copy, Check, Pin,
   Download, Sparkles, RefreshCw, FolderKanban, FileCode, Eye, ExternalLink,
   Folder, Code2, Terminal, CheckCircle, Circle, Play, Pause, Settings, GitBranch, Layers, Clock,
-  UploadCloud, FileArchive, FileUp, File, ShieldAlert, Sliders
+  UploadCloud, FileArchive, FileUp, File, ShieldAlert, Sliders, Lock, Shield, AlertTriangle, ArrowRight, HelpCircle
 } from "lucide-react";
 import {
   getBackendStatus,
@@ -29,6 +29,9 @@ import HarnessControlsDrawer from "./HarnessControlsDrawer";
 import katex from "katex";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "katex/dist/katex.min.css";
+import { MarkdownRenderer } from "./chat/markdown";
+import { inferFilenameFromPrompt } from "./chat/filenames";
+import { copyText } from "./chat/useClipboard";
 
 // Splits model reasoning from the answer. Reasoning is always extracted (and shown collapsed
 // when Deep Think is off), because some models think even when it was not requested.
@@ -89,54 +92,6 @@ const processMessageContent = (rawText, apiReasoning = "") => {
   };
 };
 
-function inferFilenameFromPrompt(prompt, defaultExt = "html") {
-  if (!prompt || typeof prompt !== "string") return `site.${defaultExt}`;
-
-  // 1. Explicit filename with extension mentioned by user: e.g. "about.html", "contact_us.html", "calc.py"
-  const explicitMatch = prompt.match(/\b([a-zA-Z0-9_-]+\.(?:html?|css|js|py|json|svg))\b/i);
-  if (explicitMatch && explicitMatch[1]) {
-    return explicitMatch[1].toLowerCase();
-  }
-
-  // 2. Specific named page request: e.g. "named weather_app", "called bar"
-  const namedMatch = prompt.match(/(?:named|called|filename)\s*[:=]?\s*["']?([a-zA-Z0-9_-]+)["']?/i);
-  if (namedMatch && namedMatch[1] && !/^(an?|the|this|my|a|it|file|named|called)$/i.test(namedMatch[1])) {
-    const rawName = namedMatch[1].toLowerCase();
-    return rawName.includes(".") ? rawName : `${rawName}.${defaultExt}`;
-  }
-
-  // 3. Self/Profile detection
-  if (/\b(yourself|about you|about yourself|who are you|your bio|profile)\b/i.test(prompt)) {
-    return `abyx_profile.${defaultExt}`;
-  }
-
-  // 4. Clean prompt words
-  let clean = prompt
-    .replace(/<[^>]+>/g, "")
-    .replace(/\b(can you|please|could you|i want you to|i want|help me|make|create|build|generate|code|develop|design|write|an?|the|website|webpage|web page|site|app|application|page|in|using|with|html5?|css|javascript|js|named|called|filename|file)\b/gi, " ")
-    .replace(/[^a-zA-Z0-9\s_-]/g, " ")
-    .trim();
-
-  // Filter stopwords
-  const stopwords = new Set([
-    "for", "about", "of", "to", "and", "on", "at", "by", "from", "my", "me", "your",
-    "this", "that", "it", "is", "a", "an", "the", "some", "any", "all", "new", "one",
-    "like", "just", "well", "rn", "now"
-  ]);
-
-  const words = clean.split(/\s+/)
-    .map(w => w.toLowerCase())
-    .filter(w => w.length > 1 && !stopwords.has(w));
-
-  if (words.length > 0) {
-    const slug = words.slice(0, 3).join("_");
-    if (slug.length >= 2) {
-      return `${slug}.${defaultExt}`;
-    }
-  }
-
-  return `site.${defaultExt}`;
-}
 
 function getActionText(message, prevUserMessage) {
   const stats = message?.generationStats || {};
@@ -357,7 +312,7 @@ function ChatThinkingSection({
         ? "Executed local GPU image generator"
         : "Executing local GPU image generator (Euler_A, 60 steps)...",
       subtitle: isComplete 
-        ? "Rendered visual assets on RTX 5060 GPU and saved to abyx/assets/"
+        ? "Rendered visual assets on local accelerator and saved to abyx/assets/"
         : "Generating photorealistic visual assets with local SD pipeline",
       status: isComplete ? "done" : "in_progress",
       time: timeElapsed > 0 ? `${(timeElapsed * 0.9).toFixed(1)}s` : null
@@ -633,6 +588,148 @@ function TextChat({
   const [activeSubmenu, setActiveSubmenu] = useState(null);
   const modelMenuRef = useRef(null);
 
+  // Local Permissions & Execution Mode (Act / Plan / Turbo / Default / Review)
+  const [permissionMode, setPermissionMode] = useState(() => {
+    return localStorage.getItem("abyx_permission_mode") || "turbo";
+  });
+  const [showPermissionsMenu, setShowPermissionsMenu] = useState(false);
+  const permissionsMenuRef = useRef(null);
+
+  const [executionMode, setExecutionMode] = useState(() => {
+    return localStorage.getItem("abyx_execution_mode") || "act";
+  });
+
+  const [thinkingEffort, setThinkingEffort] = useState(() => {
+    return localStorage.getItem("abyx_thinking_effort") || "high";
+  });
+
+  const handlePermissionModeChange = async (newMode) => {
+    setPermissionMode(newMode);
+    localStorage.setItem("abyx_permission_mode", newMode);
+    setShowPermissionsMenu(false);
+    try {
+      await fetch("/api/security/mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: executionMode === "plan" ? "plan" : "build",
+          permissionMode: newMode
+        })
+      });
+    } catch (err) {
+      console.warn("Failed to update security permission mode:", err);
+    }
+  };
+
+  const handleToggleExecutionMode = async () => {
+    const next = executionMode === "act" ? "plan" : "act";
+    setExecutionMode(next);
+    localStorage.setItem("abyx_execution_mode", next);
+    try {
+      await fetch("/api/security/mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: next === "plan" ? "plan" : "build",
+          permissionMode
+        })
+      });
+    } catch (_) {}
+  };
+
+  // Slash Commands Support (/plan, /act, /code, /turbo, /auto, /default, /review, /clear, /help)
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const slashMenuRef = useRef(null);
+
+  const SLASH_COMMANDS = useMemo(() => [
+    { cmd: "/plan", label: "/plan [task]", desc: "Formulate architecture & plan (read-only analysis, no mutations)", icon: Zap, type: "mode", mode: "plan" },
+    { cmd: "/act", label: "/act [task]", desc: "Autonomous execution & code implementation", icon: Play, type: "mode", mode: "act" },
+    { cmd: "/code", label: "/code [task]", desc: "Direct coding, refactoring, and software engineering", icon: FileCode, type: "mode", mode: "act" },
+    { cmd: "/turbo", label: "/turbo", desc: "Turbo: Unrestricted autonomous execution (no confirmation pauses)", icon: Zap, type: "permission", permission: "turbo" },
+    { cmd: "/auto", label: "/auto", desc: "Auto: Automatically decide if commands run safely", icon: Shield, type: "permission", permission: "auto" },
+    { cmd: "/default", label: "/default", desc: "Default: Ask before sensitive operations", icon: Lock, type: "permission", permission: "default" },
+    { cmd: "/review", label: "/review", desc: "Request Review: Every command requires approval", icon: Eye, type: "permission", permission: "request_review" },
+    { cmd: "/clear", label: "/clear", desc: "Clear current conversation history", icon: Trash2, type: "action", action: "clear" },
+    { cmd: "/help", label: "/help", desc: "Show command list and agent workflows", icon: HelpCircle, type: "action", action: "help" },
+  ], []);
+
+  const matchingSlashCommands = useMemo(() => {
+    if (!input.startsWith("/")) return [];
+    const commandPart = input.trim().split(/\s+/)[0].toLowerCase();
+    return SLASH_COMMANDS.filter(c => c.cmd.toLowerCase().startsWith(commandPart));
+  }, [input, SLASH_COMMANDS]);
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setInput(val);
+    if (val.startsWith("/") && !val.includes(" ")) {
+      setShowSlashMenu(true);
+    } else {
+      setShowSlashMenu(false);
+    }
+  };
+
+  const executeSlashCommandItem = async (cmdItem) => {
+    setShowSlashMenu(false);
+    if (cmdItem.type === "mode") {
+      setExecutionMode(cmdItem.mode);
+      localStorage.setItem("abyx_execution_mode", cmdItem.mode);
+      try {
+        await fetch("/api/security/mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: cmdItem.mode === "plan" ? "plan" : "build", permissionMode })
+        });
+      } catch (_) {}
+      setInput(`${cmdItem.cmd} `);
+      textareaRef.current?.focus();
+    } else if (cmdItem.type === "permission") {
+      handlePermissionModeChange(cmdItem.permission);
+      setInput("");
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `Sandbox permission set to **${cmdItem.cmd.replace("/", "").toUpperCase()}** (${cmdItem.desc}).`
+      }]);
+    } else if (cmdItem.action === "clear") {
+      setInput("");
+      setMessages([]);
+      setActiveConversationId(null);
+    } else if (cmdItem.action === "help") {
+      setInput("");
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: `### Available Slash Commands\n\n` +
+          `- **/plan [prompt]**: Formulate structured architecture and plan without tool mutations.\n` +
+          `- **/act [prompt]**: Autonomous execution, tool calls, and workspace changes.\n` +
+          `- **/code [prompt]**: Direct coding, refactoring, and implementation.\n` +
+          `- **/turbo**: Unrestricted autonomous mode (skips approval prompts).\n` +
+          `- **/auto**: Balanced automation with safe approval heuristics.\n` +
+          `- **/default**: Standard sandbox safety (prompts for sensitive operations).\n` +
+          `- **/review**: Request approval for every command.\n` +
+          `- **/clear**: Clear the current chat conversation.\n` +
+          `- **/help**: Show this help guide.`
+      }]);
+    }
+  };
+
+  useEffect(() => {
+    fetch("/api/security/status")
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.ok) {
+          if (data.mode) setExecutionMode(data.mode === "plan" ? "plan" : "act");
+          if (data.permissionMode) {
+            let pm = data.permissionMode;
+            if (pm === "ask") pm = "default";
+            if (pm === "approve for me") pm = "auto";
+            if (pm === "request review") pm = "request_review";
+            setPermissionMode(pm);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Real-time Voice Dictation (Microphone) State & Handler
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef(null);
@@ -711,6 +808,9 @@ function TextChat({
       if (modelMenuRef.current && !modelMenuRef.current.contains(event.target)) {
         setShowModelMenu(false);
         setActiveSubmenu(null);
+      }
+      if (permissionsMenuRef.current && !permissionsMenuRef.current.contains(event.target)) {
+        setShowPermissionsMenu(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -1383,6 +1483,114 @@ function TextChat({
     const hasAttachments = attachments.length > 0;
     if ((!text && !hasAttachments) || isBusy || !isChatAvailable) return;
 
+    let targetText = text;
+
+    // Intercept slash commands
+    if (text.startsWith("/")) {
+      const parts = text.split(/\s+/);
+      const command = parts[0].toLowerCase();
+      const promptText = text.slice(command.length).trim();
+
+      if (command === "/plan") {
+        setExecutionMode("plan");
+        localStorage.setItem("abyx_execution_mode", "plan");
+        fetch("/api/security/mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "plan", permissionMode })
+        }).catch(() => {});
+
+        if (!promptText && !hasAttachments) {
+          setInput("");
+          setShowSlashMenu(false);
+          setMessages(prev => [...prev, {
+            role: "assistant",
+            content: "Switched to **Plan Mode**. The agent will formulate architecture, steps, and read-only analysis without making workspace mutations."
+          }]);
+          return;
+        }
+        targetText = promptText;
+      } else if (command === "/act" || command === "/code") {
+        setExecutionMode("act");
+        localStorage.setItem("abyx_execution_mode", "act");
+        fetch("/api/security/mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "build", permissionMode })
+        }).catch(() => {});
+
+        if (!promptText && !hasAttachments) {
+          setInput("");
+          setShowSlashMenu(false);
+          setMessages(prev => [...prev, {
+            role: "assistant",
+            content: "Switched to **Act Mode**. Autonomous tool execution, code generation, and workspace modifications are enabled."
+          }]);
+          return;
+        }
+        targetText = promptText;
+      } else if (command === "/turbo") {
+        setInput("");
+        setShowSlashMenu(false);
+        handlePermissionModeChange("turbo");
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: "Sandbox permission set to **Turbo**. All commands and tools run autonomously without confirmation pauses."
+        }]);
+        return;
+      } else if (command === "/auto") {
+        setInput("");
+        setShowSlashMenu(false);
+        handlePermissionModeChange("auto");
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: "Sandbox permission set to **Auto**. Safe commands execute automatically using safe heuristics."
+        }]);
+        return;
+      } else if (command === "/default" || command === "/ask") {
+        setInput("");
+        setShowSlashMenu(false);
+        handlePermissionModeChange("default");
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: "Sandbox permission set to **Default**. The agent prompts for user confirmation before executing sensitive operations."
+        }]);
+        return;
+      } else if (command === "/review") {
+        setInput("");
+        setShowSlashMenu(false);
+        handlePermissionModeChange("request_review");
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: "Sandbox permission set to **Request Review**. Every command and filesystem change requires explicit user approval."
+        }]);
+        return;
+      } else if (command === "/clear") {
+        setInput("");
+        setShowSlashMenu(false);
+        setMessages([]);
+        setActiveConversationId(null);
+        return;
+      } else if (command === "/help") {
+        setInput("");
+        setShowSlashMenu(false);
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: `### Available Slash Commands\n\n` +
+            `- **/plan [prompt]**: Formulate structured architecture and plan without tool mutations.\n` +
+            `- **/act [prompt]**: Autonomous execution, tool calls, and workspace changes.\n` +
+            `- **/code [prompt]**: Direct coding, refactoring, and implementation.\n` +
+            `- **/turbo**: Unrestricted autonomous mode (skips approval prompts).\n` +
+            `- **/auto**: Balanced automation with safe approval heuristics.\n` +
+            `- **/default**: Standard sandbox safety (prompts for sensitive operations).\n` +
+            `- **/review**: Request approval for every command.\n` +
+            `- **/clear**: Clear the current chat conversation.\n` +
+            `- **/help**: Show this help guide.`
+        }]);
+        return;
+      }
+    }
+
     let convId = activeConversationId;
     let isNew = false;
     if (!convId) {
@@ -1404,9 +1612,9 @@ function TextChat({
       ? "For images in this conversation: answer in natural language, describe the actual image content, and read visible text carefully when relevant. If the user asks a follow-up like \"what is this\" or \"explain\", treat it as referring to the most recent image unless they say otherwise. Do not output raw JSON, arrays, bounding boxes, OCR layout objects, UI class names, or detection labels unless the user explicitly asks for that format."
       : "";
     const requestText = imageAttachments.length > 0
-      ? (text && text !== "?" ? text : "Describe what is visible in the image.")
-      : text;
-    const displayText = text || (imageAttachments.length > 0 ? "Describe what is visible in the image." : "");
+      ? (targetText && targetText !== "?" ? targetText : "Describe what is visible in the image.")
+      : targetText;
+    const displayText = targetText || (imageAttachments.length > 0 ? "Describe what is visible in the image." : "");
     const requestCombinedText = [
       requestText,
       documentContext,
@@ -1510,7 +1718,9 @@ function TextChat({
       const response = await streamChatWithLlm(requestMessages, {
         conversationId: activeConversationId,
         model: selectedModel || "auto",
-        agentMode: agentMode || "act",
+        agentMode: executionMode === "plan" ? "plan" : "act",
+        permissionMode: permissionMode,
+        thinkingEffort: thinkingEffort,
         temperature: textSettings?.temperature || 0.7,
         maxTokens: effectiveMaxTokens,
         topP: textSettings?.topP,
@@ -1720,11 +1930,11 @@ function TextChat({
     const text = Array.isArray(message.content)
       ? message.content.map(c => c.text || "").filter(Boolean).join("\n")
       : (message.content || "");
-    if (text) {
-      navigator.clipboard.writeText(text);
-      setCopiedMessageIdx(index);
-      setTimeout(() => setCopiedMessageIdx(null), 2000);
-    }
+    if (!text) return;
+    copyText(text)
+      .then(() => setCopiedMessageIdx(index))
+      .catch(() => setCopiedMessageIdx(`error-${index}`))
+      .finally(() => setTimeout(() => setCopiedMessageIdx(null), 2000));
   };
 
   const handleForkConversation = (fromIndex) => {
@@ -1889,7 +2099,9 @@ function TextChat({
       const response = await streamChatWithLlm(requestMessages, {
         conversationId: activeConversationId,
         model: selectedModel || "auto",
-        agentMode: agentMode || "act",
+        agentMode: executionMode === "plan" ? "plan" : "act",
+        permissionMode: permissionMode,
+        thinkingEffort: thinkingEffort,
         temperature: textSettings?.temperature || 0.7,
         maxTokens: textSettings?.maxTokens || 8192,
         signal: controller.signal,
@@ -2041,18 +2253,46 @@ function TextChat({
       )}
 
       <div className="chat-composer-inner">
+        {/* Floating Slash Commands Autocomplete Menu */}
+        {showSlashMenu && matchingSlashCommands.length > 0 && (
+          <div ref={slashMenuRef} className="chat-slash-menu">
+            <div className="chat-slash-menu-header">Available Commands</div>
+            {matchingSlashCommands.map((item) => {
+              const ItemIcon = item.icon;
+              return (
+                <button
+                  key={item.cmd}
+                  type="button"
+                  className="chat-slash-menu-item"
+                  onClick={() => executeSlashCommandItem(item)}
+                >
+                  <div className="chat-slash-item-left">
+                    <ItemIcon size={14} className="chat-slash-item-icon" />
+                    <span className="chat-slash-item-cmd">{item.label}</span>
+                  </div>
+                  <span className="chat-slash-item-desc">{item.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           className="chat-composer-textarea"
           value={input}
-          onChange={(event) => setInput(event.target.value)}
+          onChange={handleInputChange}
           onKeyDown={(event) => {
+            if (event.key === "Escape" && showSlashMenu) {
+              setShowSlashMenu(false);
+              return;
+            }
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               sendMessage();
             }
           }}
-          placeholder={composerPlaceholder}
+          placeholder={composerPlaceholder || "Ask anything or type / for commands..."}
           aria-label="Message"
           disabled={!isChatAvailable || isBusy}
           rows={1}
@@ -2069,34 +2309,10 @@ function TextChat({
               aria-label="Attach files"
               title={isChatAvailable ? "Attach files (text/code) or images (vision models only)" : "Select a model to attach files"}
             >
-              <Plus size={20} />
+              <Plus size={18} />
             </button>
-            <button
-              type="button"
-              className={`chat-composer-chip ${useWebSearch ? "active" : ""}`}
-              onClick={() => setUseWebSearch((value) => !value)}
-              disabled={!isChatAvailable || isBusy}
-              aria-pressed={useWebSearch}
-              title={useWebSearch ? "Disable web search" : "Enable web search"}
-            >
-              <Globe2 size={15} />
-              <span>Web</span>
-            </button>
-            {status.ready && supportsThinking && (
-              <button
-                type="button"
-                className={`chat-composer-chip ${deepThinkEnabled ? "active" : ""}`}
-                onClick={handleThinkingToggle}
-                aria-pressed={deepThinkEnabled}
-                title={deepThinkEnabled ? "Disable DeepThink reasoning" : "Enable DeepThink reasoning"}
-              >
-                <Brain size={15} />
-                <span>Think</span>
-              </button>
-            )}
-          </div>
 
-          <div className="chat-composer-toolbar-right">
+            {/* Model Selector Pill on Left (Image 2) */}
             <div ref={modelMenuRef} className="chat-model-picker">
               <button
                 type="button"
@@ -2107,11 +2323,11 @@ function TextChat({
                 aria-expanded={showModelMenu}
                 title={status.ready ? status.settings?.model : "Choose a model"}
               >
-                {(status.ready || isExplicitLocal || isCloudSelected) && (
-                  <span className="chat-model-dot" style={{ background: dotColor }} aria-hidden="true" />
-                )}
-                <span className="chat-model-trigger-label">{modelLabel}</span>
-                <ChevronDown size={15} aria-hidden="true" />
+                <span className="chat-model-dot" style={{ background: dotColor }} aria-hidden="true" />
+                <span className="chat-model-trigger-label">
+                  <span>{modelLabel}</span>
+                </span>
+                <ChevronDown size={13} aria-hidden="true" />
               </button>
 
               {showModelMenu && (
@@ -2122,7 +2338,7 @@ function TextChat({
                     position: "absolute",
                     bottom: "calc(100% + 8px)",
                     top: "auto",
-                    right: 0,
+                    left: 0,
                     zIndex: 100,
                   }}
                 >
@@ -2193,7 +2409,7 @@ function TextChat({
                             )}
                           </div>
                           <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.45)", lineHeight: "1.3", paddingLeft: "13px" }}>
-                            Strictly local • RTX 5060 GPU ({models.length} model{models.length === 1 ? "" : "s"})
+                            Strictly local • Neural Engine ({models.length} model{models.length === 1 ? "" : "s"})
                           </span>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
@@ -2207,7 +2423,7 @@ function TextChat({
                         <div
                           style={{
                             position: "absolute",
-                            right: "calc(100% + 8px)",
+                            left: "calc(100% + 8px)",
                             bottom: 0,
                             top: "auto",
                             width: "280px",
@@ -2283,7 +2499,7 @@ function TextChat({
                       )}
                     </div>
 
-                    {/* 2. CLOUD (AUTO + MORE MODELS) */}
+                    {/* 2. CLOUD */}
                     {(() => {
                       const configuredProviders = cloudProviders.filter((p) => p.hasKey || p.isConfigured);
                       return (
@@ -2304,8 +2520,8 @@ function TextChat({
                               justifyContent: "space-between",
                               padding: "9px 11px",
                               borderRadius: "12px",
-                              background: isCloudSelected ? "rgba(56, 189, 248, 0.12)" : (activeSubmenu === "cloud" ? "rgba(255,255,255,0.06)" : "transparent"),
-                              border: isCloudSelected ? "1px solid rgba(56, 189, 248, 0.28)" : "1px solid transparent",
+                              background: isCloudSelected ? "rgba(96, 165, 250, 0.12)" : (activeSubmenu === "cloud" ? "rgba(255,255,255,0.06)" : "transparent"),
+                              border: isCloudSelected ? "1px solid rgba(96, 165, 250, 0.28)" : "1px solid transparent",
                               cursor: "pointer",
                               width: "100%",
                               textAlign: "left"
@@ -2313,15 +2529,15 @@ function TextChat({
                           >
                             <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#38bdf8", flexShrink: 0 }} />
+                                <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#60a5fa", flexShrink: 0 }} />
                                 <span style={{ fontSize: "13.5px", fontWeight: 600, color: "#ededed" }}>
                                   Cloud
                                 </span>
                                 <span style={{
                                   fontSize: "10px",
                                   fontWeight: 600,
-                                  background: "rgba(56, 189, 248, 0.15)",
-                                  color: "#38bdf8",
+                                  background: "rgba(96, 165, 250, 0.15)",
+                                  color: "#60a5fa",
                                   padding: "1px 6px",
                                   borderRadius: "4px"
                                 }}>
@@ -2343,7 +2559,7 @@ function TextChat({
                             <div
                               style={{
                                 position: "absolute",
-                                right: "calc(100% + 8px)",
+                                left: "calc(100% + 8px)",
                                 bottom: 0,
                                 top: "auto",
                                 width: "280px",
@@ -2378,8 +2594,8 @@ function TextChat({
                                   width: "100%",
                                   padding: "8px 10px",
                                   borderRadius: "8px",
-                                  background: selectedModel === "pollinations/openai" ? "rgba(56, 189, 248, 0.12)" : "transparent",
-                                  border: selectedModel === "pollinations/openai" ? "1px solid rgba(56, 189, 248, 0.25)" : "1px solid transparent",
+                                  background: selectedModel === "pollinations/openai" ? "rgba(96, 165, 250, 0.12)" : "transparent",
+                                  border: selectedModel === "pollinations/openai" ? "1px solid rgba(96, 165, 250, 0.25)" : "1px solid transparent",
                                   color: "#ededed",
                                   cursor: "pointer",
                                   textAlign: "left",
@@ -2390,7 +2606,7 @@ function TextChat({
                                   <span style={{ fontSize: "12.5px", fontWeight: 500 }}>Pollinations Free tier</span>
                                   <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.4)" }}>GPT-4o Mini (Keyless Free)</span>
                                 </div>
-                                <span style={{ fontSize: "10px", color: "#38bdf8", background: "rgba(56, 189, 248, 0.12)", padding: "1px 6px", borderRadius: "6px" }}>
+                                <span style={{ fontSize: "10px", color: "#60a5fa", background: "rgba(96, 165, 250, 0.12)", padding: "1px 6px", borderRadius: "6px" }}>
                                   Free
                                 </span>
                               </button>
@@ -2421,7 +2637,7 @@ function TextChat({
                                           width: "100%",
                                           padding: "6px 8px",
                                           borderRadius: "6px",
-                                          background: isChosen ? "rgba(56, 189, 248, 0.12)" : "transparent",
+                                          background: isChosen ? "rgba(96, 165, 250, 0.12)" : "transparent",
                                           color: "#ededed",
                                           cursor: "pointer",
                                           textAlign: "left"
@@ -2473,6 +2689,107 @@ function TextChat({
                       );
                     })()}
 
+                    {/* 3. THINKING EFFORT (Image 4) */}
+                    <div style={{ position: "relative", marginTop: "4px" }}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="chat-model-menu-item"
+                        onMouseEnter={() => setActiveSubmenu("thinking_effort")}
+                        onClick={() => setActiveSubmenu(activeSubmenu === "thinking_effort" ? null : "thinking_effort")}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "9px 11px",
+                          borderRadius: "12px",
+                          background: activeSubmenu === "thinking_effort" ? "rgba(255,255,255,0.06)" : "transparent",
+                          cursor: "pointer",
+                          width: "100%",
+                          textAlign: "left"
+                        }}
+                      >
+                        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <Brain size={14} style={{ color: "#a78bfa", flexShrink: 0 }} />
+                            <span style={{ fontSize: "13.5px", fontWeight: 600, color: "#ededed" }}>
+                              Thinking effort
+                            </span>
+                            <span className="chat-model-menu-tag pro">
+                              {thinkingEffort}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.45)", lineHeight: "1.3", paddingLeft: "20px" }}>
+                            Reasoning budget: {thinkingEffort.toUpperCase()}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                          <ChevronRight size={14} color="rgba(255,255,255,0.4)" />
+                        </div>
+                      </button>
+
+                      {/* Submenu Flyout for Thinking Effort */}
+                      {activeSubmenu === "thinking_effort" && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: "calc(100% + 8px)",
+                            bottom: 0,
+                            top: "auto",
+                            width: "240px",
+                            background: "rgba(20, 20, 24, 0.98)",
+                            backdropFilter: "blur(20px)",
+                            WebkitBackdropFilter: "blur(20px)",
+                            border: "1px solid rgba(255, 255, 255, 0.1)",
+                            borderRadius: "14px",
+                            boxShadow: "0 18px 45px rgba(0, 0, 0, 0.5)",
+                            padding: "8px",
+                            zIndex: 120
+                          }}
+                        >
+                          <div style={{ padding: "4px 8px 8px 8px", fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.45)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <span>Thinking effort</span>
+                            <span style={{ fontSize: "10px", opacity: 0.6 }}>ⓘ</span>
+                          </div>
+                          {[
+                            { id: "low", label: "Low", desc: "Fast reasoning, minimal tokens" },
+                            { id: "medium", label: "Medium", desc: "Standard step-by-step reasoning" },
+                            { id: "high", label: "High", desc: "Deep multi-stage deliberation" }
+                          ].map((eff) => (
+                            <button
+                              key={eff.id}
+                              type="button"
+                              onClick={() => {
+                                setThinkingEffort(eff.id);
+                                localStorage.setItem("abyx_thinking_effort", eff.id);
+                                setActiveSubmenu(null);
+                              }}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                width: "100%",
+                                padding: "8px 10px",
+                                borderRadius: "8px",
+                                background: thinkingEffort === eff.id ? "rgba(167, 139, 250, 0.15)" : "transparent",
+                                border: thinkingEffort === eff.id ? "1px solid rgba(167, 139, 250, 0.3)" : "1px solid transparent",
+                                cursor: "pointer",
+                                color: "#ededed",
+                                marginBottom: "3px",
+                                textAlign: "left"
+                              }}
+                            >
+                              <div>
+                                <div style={{ fontSize: "12.5px", fontWeight: thinkingEffort === eff.id ? 600 : 400 }}>{eff.label}</div>
+                                <div style={{ fontSize: "10px", color: "rgba(255,255,255,0.4)" }}>{eff.desc}</div>
+                              </div>
+                              {thinkingEffort === eff.id && <Check size={14} color="#a78bfa" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
                     {status.ready && (
                       <>
                         <div className="chat-model-menu-divider" />
@@ -2496,6 +2813,115 @@ function TextChat({
               )}
             </div>
 
+            <button
+              type="button"
+              className={`chat-composer-chip ${useWebSearch ? "active" : ""}`}
+              onClick={() => setUseWebSearch((value) => !value)}
+              disabled={!isChatAvailable || isBusy}
+              aria-pressed={useWebSearch}
+              title={useWebSearch ? "Disable web search" : "Enable web search"}
+            >
+              <Globe2 size={14} />
+              <span>Web</span>
+            </button>
+            {status.ready && supportsThinking && (
+              <button
+                type="button"
+                className={`chat-composer-chip ${deepThinkEnabled ? "active" : ""}`}
+                onClick={handleThinkingToggle}
+                aria-pressed={deepThinkEnabled}
+                title={deepThinkEnabled ? "Disable DeepThink reasoning" : "Enable DeepThink reasoning"}
+              >
+                <Brain size={14} />
+                <span>Think</span>
+              </button>
+            )}
+          </div>
+
+          <div className="chat-composer-toolbar-right">
+            {/* Local Permissions / Controls Trigger - Matches Image 2 Right Side */}
+            <div className="chat-permissions-wrapper" ref={permissionsMenuRef}>
+              <button
+                type="button"
+                className={`chat-toolbar-perm-btn ${showPermissionsMenu ? "active" : ""}`}
+                onClick={() => setShowPermissionsMenu(v => !v)}
+                title="Configure local permissions and sandbox execution policies"
+              >
+                <Shield size={14} />
+                <span>{permissionMode === "turbo" ? "Turbo" : permissionMode === "request_review" ? "Review" : permissionMode === "auto" ? "Auto" : "Default"}</span>
+                <ChevronDown size={13} />
+              </button>
+
+              {showPermissionsMenu && (
+                <div className="chat-permissions-dropdown" style={{ right: 0, left: "auto" }}>
+                  <div className="chat-permissions-header">Local Permissions</div>
+
+                  <button
+                    type="button"
+                    className={`chat-permissions-item ${permissionMode === "request_review" ? "selected" : ""}`}
+                    onClick={() => handlePermissionModeChange("request_review")}
+                  >
+                    <div className="chat-permissions-item-left">
+                      <Eye size={15} className="chat-permissions-item-icon" />
+                      <div>
+                        <div className="chat-permissions-item-title">Request Review</div>
+                        <div className="chat-permissions-item-desc">Every command requires approval.</div>
+                      </div>
+                    </div>
+                    {permissionMode === "request_review" && <Check size={14} color="#4ade80" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`chat-permissions-item ${permissionMode === "default" || permissionMode === "ask" ? "selected" : ""}`}
+                    onClick={() => handlePermissionModeChange("default")}
+                  >
+                    <div className="chat-permissions-item-left">
+                      <Lock size={15} className="chat-permissions-item-icon" />
+                      <div>
+                        <div className="chat-permissions-item-title">Default</div>
+                        <div className="chat-permissions-item-desc">Ask before sensitive operations.</div>
+                      </div>
+                    </div>
+                    {(permissionMode === "default" || permissionMode === "ask") && <Check size={14} color="#4ade80" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`chat-permissions-item ${permissionMode === "auto" ? "selected" : ""}`}
+                    onClick={() => handlePermissionModeChange("auto")}
+                  >
+                    <div className="chat-permissions-item-left">
+                      <Shield size={15} className="chat-permissions-item-icon" />
+                      <div>
+                        <div className="chat-permissions-item-title">Auto</div>
+                        <div className="chat-permissions-item-desc">Automatically decide if commands run.</div>
+                      </div>
+                    </div>
+                    {permissionMode === "auto" && <Check size={14} color="#4ade80" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`chat-permissions-item ${permissionMode === "turbo" ? "selected" : ""}`}
+                    onClick={() => handlePermissionModeChange("turbo")}
+                  >
+                    <div className="chat-permissions-item-left">
+                      <AlertTriangle size={15} className="chat-permissions-item-icon" style={{ color: "#f87171" }} />
+                      <div>
+                        <div className="chat-permissions-item-title">
+                          Turbo
+                          <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.08)", padding: "1px 5px", borderRadius: "4px" }}>Default</span>
+                        </div>
+                        <div className="chat-permissions-item-desc">Run all commands without restrictions.</div>
+                      </div>
+                    </div>
+                    {permissionMode === "turbo" && <Check size={14} color="#4ade80" />}
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* Voice Dictation (Mic) Button */}
             <button
               type="button"
@@ -2504,24 +2930,11 @@ function TextChat({
               disabled={!isChatAvailable || isBusy}
               aria-label={isListening ? "Stop listening" : "Voice dictation (Mic)"}
               title={isListening ? "Listening... Click to stop speaking" : "Speak to type (Microphone)"}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: "36px",
-                height: "36px",
-                borderRadius: "50%",
-                border: isListening ? "1px solid #ef4444" : "1px solid rgba(255, 255, 255, 0.12)",
-                background: isListening ? "rgba(239, 68, 68, 0.22)" : "rgba(255, 255, 255, 0.05)",
-                color: isListening ? "#ef4444" : "#ededed",
-                cursor: (!isChatAvailable || isBusy) ? "not-allowed" : "pointer",
-                transition: "all 0.2s ease",
-                marginRight: "6px"
-              }}
             >
-              <Mic size={17} style={{ animation: isListening ? "pulse 1s infinite" : "none" }} />
+              <Mic size={16} />
             </button>
 
+            {/* Blue Circular Submit Button - Matches Image 2 */}
             {isBusy ? (
               <button type="button" className="chat-composer-stop-btn" onClick={handleStopGeneration} aria-label="Stop generating" title="Stop generating">
                 <Square size={14} fill="currentColor" />
@@ -2535,7 +2948,7 @@ function TextChat({
                 aria-label="Send message"
                 title="Send message"
               >
-                <ArrowUp size={18} strokeWidth={2.25} />
+                <ArrowRight size={17} strokeWidth={2.5} />
               </button>
             )}
           </div>
@@ -2993,7 +3406,7 @@ function TextChat({
                                 title="Copy message text"
                               >
                                 {copiedMessageIdx === index ? <Check size={13} style={{ color: "var(--md-sys-color-primary)" }} /> : <Copy size={13} />}
-                                <span>{copiedMessageIdx === index ? "Copied" : "Copy"}</span>
+                                <span aria-live="polite">{copiedMessageIdx === index ? "Copied" : copiedMessageIdx === `error-${index}` ? "Copy failed" : "Copy"}</span>
                               </button>
                               <button
                                 type="button"
@@ -3022,7 +3435,7 @@ function TextChat({
                                 title="Copy response markdown"
                               >
                                 {copiedMessageIdx === index ? <Check size={13} style={{ color: "var(--md-sys-color-primary)" }} /> : <Copy size={13} />}
-                                <span>{copiedMessageIdx === index ? "Copied" : "Copy"}</span>
+                                <span aria-live="polite">{copiedMessageIdx === index ? "Copied" : copiedMessageIdx === `error-${index}` ? "Copy failed" : "Copy"}</span>
                               </button>
                               <button
                                 type="button"
@@ -3379,1471 +3792,5 @@ async function extractPdfText(file) {
   return pages.join("\n\n");
 }
 
-function MathFormula({ tex, display = false }) {
-  const html = katex.renderToString(tex, { displayMode: display, throwOnError: false, output: "html" });
-  return display
-    ? <div className="chat-math-block" dangerouslySetInnerHTML={{ __html: html }} />
-    : <span dangerouslySetInnerHTML={{ __html: html }} />;
-}
-
-// Inline math: \( ... \) or $...$ (no space just inside the dollars and no digit right
-// after the closing one, so prices like "$5 and $10" stay plain text).
-const INLINE_MATH = String.raw`\\\(.+?\\\)|\$(?:[^\s$]|[^\s$][^$\n]*?[^\s$])\$(?!\d)`;
-
-function parseInlineMarkdown(text) {
-  const regex = new RegExp(`(${INLINE_MATH}|\\*\\*.*?\\*\\*|\`.*?\`|\\*.*?\\*|\\[.*?\\]\\(.*?\\))`, "g");
-  const parts = text.split(regex);
-
-  return parts.map((part, idx) => {
-    if (part.length > 4 && part.startsWith("\\(") && part.endsWith("\\)")) {
-      return <MathFormula key={idx} tex={part.slice(2, -2)} />;
-    }
-    if (part.length > 2 && part.startsWith("$") && part.endsWith("$")) {
-      return <MathFormula key={idx} tex={part.slice(1, -1)} />;
-    }
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={idx}>{part.slice(2, -2)}</strong>;
-    }
-    if (part.startsWith("`") && part.endsWith("`")) {
-      return <code key={idx} className="markdown-inline-code">{part.slice(1, -1)}</code>;
-    }
-    if (part.startsWith("*") && part.endsWith("*")) {
-      return <em key={idx}>{part.slice(1, -1)}</em>;
-    }
-    if (part.startsWith("[") && part.includes("](") && part.endsWith(")")) {
-      const match = part.match(/\[(.*?)\]\((.*?)\)/);
-      if (match) {
-        const linkUrl = match[2] || "";
-        const isPreviewAction = linkUrl.startsWith("action:preview") || linkUrl.startsWith("local://") || linkUrl.includes("openInsideBrowser");
-        if (isPreviewAction) {
-          const fileMatch = linkUrl.match(/(?:file=|local:\/\/)([^'")\s&]+)/);
-          const targetFile = fileMatch ? fileMatch[1] : "index.html";
-          return (
-            <button
-              key={idx}
-              type="button"
-              className="chat-action-link"
-              onClick={() => {
-                if (window.openInsideBrowser) window.openInsideBrowser(`local://${targetFile}`);
-              }}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "5px",
-                color: "#45D483",
-                background: "rgba(69, 212, 131, 0.12)",
-                border: "1px solid rgba(69, 212, 131, 0.3)",
-                borderRadius: "5px",
-                padding: "2px 8px",
-                fontSize: "12px",
-                fontWeight: "600",
-                cursor: "pointer",
-                margin: "0 3px",
-                textDecoration: "none"
-              }}
-              title={`Preview ${targetFile} in built-in browser`}
-            >
-              <Globe size={12} style={{ flexShrink: 0 }} />
-              <span>{match[1]}</span>
-            </button>
-          );
-        }
-        return (
-          <a key={idx} href={match[2]} target="_blank" rel="noopener noreferrer" className="markdown-link">
-            {match[1]}
-          </a>
-        );
-      }
-    }
-    return part;
-  });
-}
-
-/**
- * Interactive Code Block with Copy, Download on bottom, and Preview at the last
- */
-export function CodeBlockRenderer({ code, lang, onOpenBrowser, isComplete = true, userPrompt = "" }) {
-  const [copied, setCopied] = useState(false);
-  const [downloaded, setDownloaded] = useState(false);
-  const [revealed, setRevealed] = useState(false);
-  const [revealing, setRevealing] = useState(false);
-  const [showCode, setShowCode] = useState(false);
-
-  const cleanCode = (code || "").trim();
-  const lowerLang = (lang || "").toLowerCase().trim();
-
-  // 1. Detect filename from header comments if present
-  let detectedFilename = "";
-  const firstLine = cleanCode.split("\n")[0] || "";
-  const filenameMatch = firstLine.match(/(?:\/\/|#|<!--|\/\*)\s*(?:filename|file|name|path):\s*([a-zA-Z0-9_./-]+)/i);
-  if (filenameMatch && filenameMatch[1]) {
-    detectedFilename = filenameMatch[1].trim().replace(/^[/\\]+/, "");
-    // If the model defaulted to generic "index.html" but the user requested a specific topic,
-    // override with the inferred topic name so previous files are preserved.
-    if (detectedFilename.toLowerCase() === "index.html" && userPrompt && !userPrompt.toLowerCase().includes("index.html")) {
-      const inferred = inferFilenameFromPrompt(userPrompt, "html");
-      if (inferred && inferred !== "site.html") {
-        detectedFilename = inferred;
-      }
-    }
-  }
-
-  // 2. Fallback filename & MIME type mapping
-  let defaultExt = "txt";
-  let mimeType = "text/plain";
-  const isHtml = lowerLang === "html" || lowerLang === "htm" || cleanCode.includes("<!DOCTYPE") || cleanCode.includes("<html") || cleanCode.includes("</html>");
-  const isSvg = lowerLang === "svg" || (cleanCode.startsWith("<svg") && cleanCode.includes("</svg>"));
-  const isMarkdown = lowerLang === "md" || lowerLang === "markdown";
-
-  let badgeText = "CODE";
-  if (isHtml) {
-    defaultExt = "html";
-    mimeType = "text/html;charset=utf-8";
-    badgeText = "HTML";
-  } else if (isSvg) {
-    defaultExt = "svg";
-    mimeType = "image/svg+xml";
-    badgeText = "SVG";
-  } else if (["js", "javascript", "node", "mjs", "cjs"].includes(lowerLang)) {
-    defaultExt = "js";
-    mimeType = "text/javascript";
-    badgeText = "JS";
-  } else if (["ts", "typescript"].includes(lowerLang)) {
-    defaultExt = "ts";
-    mimeType = "text/typescript";
-    badgeText = "TS";
-  } else if (lowerLang === "jsx") {
-    defaultExt = "jsx";
-    mimeType = "text/javascript";
-    badgeText = "JSX";
-  } else if (lowerLang === "tsx") {
-    defaultExt = "tsx";
-    mimeType = "text/typescript";
-    badgeText = "TSX";
-  } else if (["py", "python"].includes(lowerLang)) {
-    defaultExt = "py";
-    mimeType = "text/x-python";
-    badgeText = "PY";
-  } else if (lowerLang === "css") {
-    defaultExt = "css";
-    mimeType = "text/css";
-    badgeText = "CSS";
-  } else if (lowerLang === "json") {
-    defaultExt = "json";
-    mimeType = "application/json";
-    badgeText = "JSON";
-  } else if (["sh", "bash", "shell", "zsh"].includes(lowerLang)) {
-    defaultExt = "sh";
-    mimeType = "text/x-sh";
-    badgeText = "SH";
-  } else if (["bat", "cmd", "powershell", "ps1"].includes(lowerLang)) {
-    defaultExt = lowerLang === "ps1" ? "ps1" : "bat";
-    mimeType = "text/plain";
-    badgeText = "BAT";
-  } else if (["sql", "sqlite"].includes(lowerLang)) {
-    defaultExt = "sql";
-    mimeType = "text/plain";
-    badgeText = "SQL";
-  } else if (isMarkdown) {
-    defaultExt = "md";
-    mimeType = "text/markdown";
-    badgeText = "MD";
-  } else if (lowerLang) {
-    defaultExt = lowerLang.slice(0, 8);
-    badgeText = defaultExt.toUpperCase().slice(0, 4);
-  }
-
-  const fallbackHtmlName = userPrompt ? inferFilenameFromPrompt(userPrompt, "html") : "index.html";
-  const filename = detectedFilename || (isHtml ? fallbackHtmlName : isSvg ? "graphic.svg" : (badgeText === "PY" ? "main.py" : (badgeText === "JS" ? "script.js" : `file.${defaultExt}`)));
-  const lineCount = cleanCode.split("\n").length;
-  const byteLen = new Blob([cleanCode]).size;
-  const sizeStr = byteLen < 1024 ? `${byteLen} B` : `${(byteLen / 1024).toFixed(1)} KB`;
-  const relativeDisplayPath = `abyx/${filename}`;
-
-  // Media files (PNG, JPG, WAV, etc.) or raw <img> tags must NEVER be rendered as code cards
-  const mediaExtRegex = /\.(?:png|jpe?g|webp|gif|ico|bmp|tiff|wav|mp3|ogg|flac|m4a)$/i;
-  const isImageOrMedia = mediaExtRegex.test(filename) ||
-    mediaExtRegex.test(lowerLang) ||
-    mediaExtRegex.test(detectedFilename) ||
-    mediaExtRegex.test(firstLine) ||
-    ["png", "jpg", "jpeg", "webp", "gif", "ico", "bmp", "tiff", "wav", "mp3", "ogg", "flac", "audio", "image"].includes(lowerLang) ||
-    cleanCode.includes("<img") ||
-    cleanCode.includes("[IMAGE:") ||
-    cleanCode.includes("[AUDIO:") ||
-    cleanCode.includes("data-generate=") ||
-    cleanCode.includes("data-prompt=");
-
-  // Auto-save to workspace whenever code block is generated and complete
-  useEffect(() => {
-    if (isComplete && !isImageOrMedia && cleanCode && cleanCode.length > 5 && filename) {
-      saveWorkspaceFile(filename, cleanCode, "", null, userPrompt).catch(() => {});
-    }
-  }, [isComplete, isImageOrMedia, filename, cleanCode, userPrompt]);
-
-  const handleCopy = useCallback(() => {
-    try {
-      navigator.clipboard.writeText(cleanCode);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (_) {}
-  }, [cleanCode]);
-
-  const handleDownload = useCallback(() => {
-    try {
-      const blob = new Blob([cleanCode], { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      setDownloaded(true);
-      setTimeout(() => setDownloaded(false), 2000);
-    } catch (err) {
-      console.error("Download failed", err);
-    }
-  }, [cleanCode, mimeType, filename]);
-
-  const handleReveal = useCallback(async () => {
-    setRevealing(true);
-    try {
-      await saveWorkspaceFile(filename, cleanCode).catch(() => {});
-      const res = await revealWorkspaceFile(filename, cleanCode);
-      if (res && res.ok) {
-        setRevealed(true);
-        setTimeout(() => setRevealed(false), 2500);
-      }
-    } catch (err) {
-      console.error("Reveal failed:", err);
-    } finally {
-      setRevealing(false);
-    }
-  }, [filename, cleanCode]);
-
-  const handlePreview = useCallback(async () => {
-    try {
-      if (isHtml || isSvg) {
-        if (isHtml) {
-          try {
-            saveWorkspaceFile(filename, cleanCode).catch(() => {});
-          } catch (_) {}
-        }
-        const localTarget = `local://${filename}`;
-        if (window.openInsideBrowser) {
-          window.openInsideBrowser(localTarget);
-        } else if (onOpenBrowser) {
-          onOpenBrowser(localTarget);
-        } else {
-          const blob = new Blob([cleanCode], { type: isSvg ? "image/svg+xml" : "text/html;charset=utf-8" });
-          window.open(URL.createObjectURL(blob), "_blank");
-        }
-      }
-    } catch (err) {
-      console.error("Preview failed", err);
-    }
-  }, [cleanCode, isHtml, isSvg, onOpenBrowser, filename]);
-
-  // Strictly reveal file cards only at the end when generation is complete and not media
-  if (!isComplete || isImageOrMedia) {
-    return null;
-  }
-
-  return (
-    <div className="abyx-file-card-wrapper" style={{
-      margin: "10px 0",
-      borderRadius: "12px",
-      border: "1px solid rgba(255, 255, 255, 0.08)",
-      background: "#101014",
-      overflow: "hidden",
-      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.2)",
-      width: "100%",
-      maxWidth: "760px"
-    }}>
-      {/* Sleek Minimalist File Card Header */}
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "10px 14px",
-        gap: "12px",
-        flexWrap: "wrap"
-      }}>
-        {/* Left: Badge & File Info */}
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: "1 1 240px" }}>
-          {/* Badge */}
-          <div style={{
-            width: "36px",
-            height: "36px",
-            borderRadius: "8px",
-            background: "rgba(165, 180, 252, 0.08)",
-            border: "1px solid rgba(165, 180, 252, 0.18)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: "10.5px",
-            fontWeight: "700",
-            color: "#a5b4fc",
-            letterSpacing: "0.5px",
-            flexShrink: 0
-          }}>
-            {badgeText}
-          </div>
-
-          {/* Metadata Column */}
-          <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
-            <div style={{
-              fontSize: "13px",
-              fontWeight: "600",
-              color: "#f3f4f6",
-              letterSpacing: "-0.01em",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap"
-            }}>
-              {filename}
-            </div>
-            <div style={{
-              fontSize: "11px",
-              color: "rgba(255, 255, 255, 0.45)",
-              fontFamily: "'JetBrains Mono', monospace",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px"
-            }}>
-              <span>{badgeText}</span>
-              <span style={{ opacity: 0.35 }}>•</span>
-              <span>{sizeStr}</span>
-              <span style={{ opacity: 0.35 }}>•</span>
-              <span style={{ opacity: 0.85 }}>{relativeDisplayPath}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Actions (Download, Reveal, Code) */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
-          {/* Download */}
-          <button
-            type="button"
-            onClick={handleDownload}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              height: "30px",
-              padding: "0 12px",
-              borderRadius: "7px",
-              background: downloaded ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.08)",
-              color: downloaded ? "#4ade80" : "#f3f4f6",
-              fontSize: "12px",
-              fontWeight: "500",
-              border: downloaded ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.12)",
-              cursor: "pointer",
-              transition: "all 0.15s ease"
-            }}
-            title={`Download ${filename}`}
-            onMouseEnter={(e) => {
-              if (!downloaded) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.13)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.2)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!downloaded) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.12)";
-              }
-            }}
-          >
-            {downloaded ? <Check size={13} strokeWidth={2.4} /> : <Download size={13} strokeWidth={2} />}
-            <span>{downloaded ? "Saved" : "Download"}</span>
-          </button>
-
-          {/* Reveal */}
-          <button
-            type="button"
-            onClick={handleReveal}
-            disabled={revealing}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              height: "30px",
-              padding: "0 12px",
-              borderRadius: "7px",
-              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.03)",
-              color: revealed ? "#4ade80" : "rgba(255, 255, 255, 0.75)",
-              fontSize: "12px",
-              fontWeight: "500",
-              border: revealed ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(255, 255, 255, 0.08)",
-              cursor: revealing ? "wait" : "pointer",
-              transition: "all 0.15s ease"
-            }}
-            title={`Reveal ${filename} in File Explorer`}
-            onMouseEnter={(e) => {
-              if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
-                e.currentTarget.style.color = "#f3f4f6";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.16)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
-                e.currentTarget.style.color = "rgba(255, 255, 255, 0.75)";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
-              }
-            }}
-          >
-            {revealed ? <Check size={13} color="#4ade80" /> : <Folder size={13} />}
-            <span>{revealed ? "Revealed" : revealing ? "Opening..." : "Reveal"}</span>
-          </button>
-
-          {/* Code */}
-          <button
-            type="button"
-            onClick={() => setShowCode(!showCode)}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              height: "30px",
-              padding: "0 12px",
-              borderRadius: "7px",
-              background: showCode ? "rgba(165, 180, 252, 0.12)" : "rgba(255, 255, 255, 0.03)",
-              color: showCode ? "#a5b4fc" : "rgba(255, 255, 255, 0.75)",
-              fontSize: "12px",
-              fontWeight: "500",
-              border: showCode ? "1px solid rgba(165, 180, 252, 0.3)" : "1px solid rgba(255, 255, 255, 0.08)",
-              cursor: "pointer",
-              transition: "all 0.15s ease"
-            }}
-            title={showCode ? "Hide source code" : "View source code"}
-            onMouseEnter={(e) => {
-              if (!showCode) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
-                e.currentTarget.style.color = "#f3f4f6";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!showCode) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)";
-                e.currentTarget.style.color = "rgba(255, 255, 255, 0.75)";
-              }
-            }}
-          >
-            <Code2 size={13} />
-            <span>Code</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Expanded Code Viewer (When Code is toggled open) */}
-      {showCode && (
-        <div style={{
-          borderTop: "1px solid rgba(255, 255, 255, 0.08)",
-          background: "#0a0a0d",
-          padding: "12px 16px"
-        }}>
-          {/* Code Toolbar */}
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: "10px",
-            gap: "8px",
-            flexWrap: "wrap"
-          }}>
-            <div style={{
-              fontSize: "11px",
-              fontFamily: "'JetBrains Mono', monospace",
-              color: "rgba(255, 255, 255, 0.45)",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px"
-            }}>
-              <FileCode size={13} color="#94a3b8" />
-              <span style={{ color: "#94a3b8", textTransform: "uppercase", fontWeight: "600" }}>{lang || defaultExt}</span>
-              <span>•</span>
-              <span>{lineCount} lines</span>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              {/* Copy Button */}
-              <button
-                type="button"
-                onClick={handleCopy}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "4px",
-                  padding: "4px 10px",
-                  borderRadius: "6px",
-                  fontSize: "11.5px",
-                  background: "rgba(255, 255, 255, 0.06)",
-                  color: copied ? "#4ade80" : "#d1d5db",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
-                  cursor: "pointer"
-                }}
-                title="Copy code to clipboard"
-              >
-                {copied ? <Check size={12} /> : <Copy size={12} />}
-                <span>{copied ? "Copied" : "Copy"}</span>
-              </button>
-
-              {/* Download with Specific Extension */}
-              <button
-                type="button"
-                onClick={handleDownload}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "4px",
-                  padding: "4px 10px",
-                  borderRadius: "6px",
-                  fontSize: "11.5px",
-                  background: "rgba(56, 189, 248, 0.12)",
-                  color: "#38bdf8",
-                  border: "1px solid rgba(56, 189, 248, 0.25)",
-                  cursor: "pointer"
-                }}
-                title={`Download .${defaultExt}`}
-              >
-                <Download size={12} />
-                <span>.{defaultExt}</span>
-              </button>
-
-              {/* Preview Button for HTML / SVG */}
-              {(isHtml || isSvg) && (
-                <button
-                  type="button"
-                  onClick={handlePreview}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    padding: "4px 10px",
-                    borderRadius: "6px",
-                    fontSize: "11.5px",
-                    background: "rgba(74, 222, 128, 0.12)",
-                    color: "#4ade80",
-                    border: "1px solid rgba(74, 222, 128, 0.25)",
-                    cursor: "pointer"
-                  }}
-                  title="Preview in Built-in Browser"
-                >
-                  <Globe size={12} />
-                  <span>Preview</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Code Text Content */}
-          <pre style={{
-            margin: 0,
-            padding: "12px",
-            borderRadius: "8px",
-            background: "#050507",
-            border: "1px solid rgba(255, 255, 255, 0.05)",
-            color: "#e2e8f0",
-            fontFamily: "'JetBrains Mono', Consolas, Monaco, monospace",
-            fontSize: "12px",
-            lineHeight: "1.6",
-            overflowX: "auto",
-            maxHeight: "440px"
-          }}>
-            <code>{cleanCode}</code>
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Sleek Image Card Renderer (Matching Reference Layout)
- */
-export function ImageBlockRenderer({ src, alt, filename }) {
-  const [downloaded, setDownloaded] = useState(false);
-  const [revealed, setRevealed] = useState(false);
-  const [revealing, setRevealing] = useState(false);
-  const [showFull, setShowFull] = useState(false);
-
-  const cleanFilename = filename || (src ? String(src).split("/").pop().split("\\").pop().split("?")[0] : "image.png");
-  const displaySrc = (src && (src.startsWith("http") || src.startsWith("/") || src.startsWith("data:")))
-    ? src 
-    : `/api/output-file?filename=${encodeURIComponent(cleanFilename)}`;
-
-  const handleDownload = () => {
-    try {
-      const a = document.createElement("a");
-      a.href = displaySrc;
-      a.download = cleanFilename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setDownloaded(true);
-      setTimeout(() => setDownloaded(false), 2000);
-    } catch (_) {}
-  };
-
-  const handleReveal = async () => {
-    setRevealing(true);
-    try {
-      const res = await revealWorkspaceFile(`assets/${cleanFilename}`);
-      if (res && res.ok) {
-        setRevealed(true);
-        setTimeout(() => setRevealed(false), 2500);
-      }
-    } catch (_) {}
-    finally {
-      setRevealing(false);
-    }
-  };
-
-  return (
-    <div className="abyx-file-card-wrapper" style={{
-      margin: "8px 0",
-      borderRadius: "12px",
-      border: "1px solid rgba(255, 255, 255, 0.08)",
-      background: "#121215",
-      overflow: "hidden",
-      boxShadow: "0 2px 8px rgba(0, 0, 0, 0.25)",
-      width: "100%",
-      maxWidth: "760px"
-    }}>
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "8px 12px",
-        gap: "12px",
-        flexWrap: "wrap"
-      }}>
-        {/* Left: Thumbnail Preview & Metadata */}
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: "1 1 240px" }}>
-          {/* Badge: Sleek Image Icon */}
-          <div 
-            onClick={() => setShowFull(!showFull)}
-            style={{
-              width: "34px",
-              height: "34px",
-              borderRadius: "8px",
-              background: "rgba(56, 189, 248, 0.08)",
-              border: "1px solid rgba(56, 189, 248, 0.18)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              flexShrink: 0,
-              transition: "all 0.15s ease"
-            }}
-            title="Click to toggle image preview"
-          >
-            <ImageIcon size={16} style={{ color: "#38bdf8" }} />
-          </div>
-
-          <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" }}>
-            <div style={{
-              fontSize: "12.5px",
-              fontWeight: "500",
-              color: "#f3f4f6",
-              letterSpacing: "-0.01em",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap"
-            }}>
-              {cleanFilename}
-            </div>
-            <div style={{
-              fontSize: "11px",
-              color: "rgba(255, 255, 255, 0.45)",
-              fontFamily: "'JetBrains Mono', monospace",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px"
-            }}>
-              <span>PNG</span>
-              <span style={{ opacity: 0.35 }}>•</span>
-              <span style={{ opacity: 0.85 }}>abyx/assets/{cleanFilename}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Actions */}
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
-          <button
-            type="button"
-            onClick={handleDownload}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "5px",
-              height: "28px",
-              padding: "0 10px",
-              borderRadius: "6px",
-              background: downloaded ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.05)",
-              color: downloaded ? "#4ade80" : "#d1d5db",
-              fontSize: "12px",
-              fontWeight: "500",
-              border: downloaded ? "1px solid rgba(74, 222, 128, 0.25)" : "1px solid rgba(255, 255, 255, 0.08)",
-              cursor: "pointer",
-              transition: "all 0.15s ease"
-            }}
-            title="Download Image"
-            onMouseEnter={(e) => {
-              if (!downloaded) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.09)";
-                e.currentTarget.style.color = "#ffffff";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!downloaded) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
-                e.currentTarget.style.color = "#d1d5db";
-              }
-            }}
-          >
-            {downloaded ? <Check size={12} strokeWidth={2.4} /> : <Download size={12} strokeWidth={2.2} />}
-            <span>{downloaded ? "Saved" : "Download"}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleReveal}
-            disabled={revealing}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "5px",
-              height: "28px",
-              padding: "0 10px",
-              borderRadius: "6px",
-              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.05)",
-              color: revealed ? "#4ade80" : "#d1d5db",
-              fontSize: "12px",
-              fontWeight: "500",
-              border: revealed ? "1px solid rgba(74, 222, 128, 0.25)" : "1px solid rgba(255, 255, 255, 0.08)",
-              cursor: revealing ? "wait" : "pointer",
-              transition: "all 0.15s ease"
-            }}
-            title="Reveal in Windows Explorer"
-            onMouseEnter={(e) => {
-              if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.09)";
-                e.currentTarget.style.color = "#ffffff";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
-                e.currentTarget.style.color = "#d1d5db";
-              }
-            }}
-          >
-            {revealed ? <Check size={12} color="#4ade80" /> : <Folder size={12} />}
-            <span>{revealed ? "Revealed" : revealing ? "Opening..." : "Reveal"}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowFull(!showFull)}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "28px",
-              height: "28px",
-              borderRadius: "6px",
-              background: showFull ? "rgba(56, 189, 248, 0.12)" : "rgba(255, 255, 255, 0.05)",
-              color: showFull ? "#38bdf8" : "#9ca3af",
-              border: showFull ? "1px solid rgba(56, 189, 248, 0.25)" : "1px solid rgba(255, 255, 255, 0.08)",
-              cursor: "pointer",
-              transition: "all 0.15s ease"
-            }}
-            title={showFull ? "Collapse preview" : "View preview"}
-            onMouseEnter={(e) => {
-              if (!showFull) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.09)";
-                e.currentTarget.style.color = "#ffffff";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!showFull) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
-                e.currentTarget.style.color = "#9ca3af";
-              }
-            }}
-          >
-            <Eye size={13} strokeWidth={2} />
-          </button>
-        </div>
-      </div>
-
-      {showFull && (
-        <div style={{
-          padding: "12px",
-          borderTop: "1px solid rgba(255, 255, 255, 0.06)",
-          background: "#08080a",
-          display: "flex",
-          justifyContent: "center"
-        }}>
-          <img 
-            src={displaySrc} 
-            alt={alt || "Generated Output"} 
-            style={{
-              maxWidth: "100%",
-              maxHeight: "480px",
-              borderRadius: "8px",
-              border: "1px solid rgba(255, 255, 255, 0.08)",
-              objectFit: "contain"
-            }} 
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Sleek Audio Player Card Renderer (Kokoro AI Speech)
- */
-export function AudioBlockRenderer({ src, filename, duration, text }) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [downloaded, setDownloaded] = useState(false);
-  const [revealed, setRevealed] = useState(false);
-  const [revealing, setRevealing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const audioRef = useRef(null);
-
-  const cleanFilename = filename || (src ? String(src).split("/").pop().split("\\").pop().split("?")[0] : "speech.wav");
-  const displaySrc = src || `/tts-outputs/${encodeURIComponent(cleanFilename)}`;
-
-  const togglePlay = () => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio(displaySrc);
-      audioRef.current.ontimeupdate = () => {
-        if (audioRef.current && audioRef.current.duration) {
-          setProgress(audioRef.current.currentTime / audioRef.current.duration);
-        }
-      };
-      audioRef.current.onended = () => {
-        setIsPlaying(false);
-        setProgress(0);
-      };
-      audioRef.current.onerror = async () => {
-        if (text && text.trim().length > 0) {
-          try {
-            const genRes = await fetch("/api/chat/quick-audio", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text, filename: cleanFilename })
-            });
-            const genData = await genRes.json();
-            if (genData?.ok && genData?.audio?.url) {
-              audioRef.current.src = genData.audio.url;
-              audioRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
-              return;
-            }
-          } catch (_) {}
-        }
-        if (!audioRef.current.src.includes("/api/output-file")) {
-          audioRef.current.src = `/api/output-file?filename=${encodeURIComponent(cleanFilename)}`;
-          audioRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
-        } else {
-          setIsPlaying(false);
-        }
-      };
-    }
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {
-        if (audioRef.current) {
-          audioRef.current.src = `/api/output-file?filename=${encodeURIComponent(cleanFilename)}`;
-          audioRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
-        }
-      });
-    }
-  };
-
-  const handleDownload = () => {
-    try {
-      const a = document.createElement("a");
-      a.href = `/api/output-file?filename=${encodeURIComponent(cleanFilename)}`;
-      a.download = cleanFilename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setDownloaded(true);
-      setTimeout(() => setDownloaded(false), 2000);
-    } catch (_) {}
-  };
-
-  const handleReveal = async () => {
-    setRevealing(true);
-    try {
-      let res = await revealWorkspaceFile(`audio/${cleanFilename}`);
-      if (!res || !res.ok) {
-        res = await revealWorkspaceFile(cleanFilename);
-      }
-      if ((!res || !res.ok) && text) {
-        try {
-          const genRes = await fetch("/api/chat/quick-audio", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text, filename: cleanFilename })
-          });
-          const genData = await genRes.json();
-          if (genData?.ok) {
-            res = await revealWorkspaceFile(`audio/${cleanFilename}`);
-          }
-        } catch (_) {}
-      }
-      if (res && (res.ok || res.revealed)) {
-        setRevealed(true);
-        setTimeout(() => setRevealed(false), 2500);
-      }
-    } catch (_) {}
-    finally {
-      setRevealing(false);
-    }
-  };
-
-  return (
-    <div className="abyx-file-card-wrapper" style={{
-      margin: "8px 0",
-      borderRadius: "12px",
-      border: "1px solid rgba(255, 255, 255, 0.08)",
-      background: "#121215",
-      overflow: "hidden",
-      boxShadow: "0 2px 8px rgba(0, 0, 0, 0.25)",
-      width: "100%",
-      maxWidth: "760px"
-    }}>
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "8px 12px",
-        gap: "12px",
-        flexWrap: "wrap"
-      }}>
-        {/* Left: Play/Pause & Info */}
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: "1 1 240px" }}>
-          <button
-            type="button"
-            onClick={togglePlay}
-            style={{
-              width: "34px",
-              height: "34px",
-              borderRadius: "50%",
-              background: isPlaying ? "rgba(34, 197, 94, 0.2)" : "rgba(34, 197, 94, 0.1)",
-              color: "#22c55e",
-              border: isPlaying ? "1px solid rgba(34, 197, 94, 0.4)" : "1px solid rgba(34, 197, 94, 0.2)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              flexShrink: 0,
-              transition: "all 0.15s ease"
-            }}
-            title={isPlaying ? "Pause" : "Play Kokoro Audio"}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = isPlaying ? "rgba(34, 197, 94, 0.28)" : "rgba(34, 197, 94, 0.18)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = isPlaying ? "rgba(34, 197, 94, 0.2)" : "rgba(34, 197, 94, 0.1)";
-            }}
-          >
-            {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" style={{ marginLeft: "2px" }} />}
-          </button>
-
-          <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "2px", flex: 1 }}>
-            <div style={{
-              fontSize: "12.5px",
-              fontWeight: "500",
-              color: "#f3f4f6",
-              letterSpacing: "-0.01em",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap"
-            }}>
-              {cleanFilename}
-            </div>
-            <div style={{
-              fontSize: "11px",
-              color: "rgba(255, 255, 255, 0.45)",
-              fontFamily: "'JetBrains Mono', monospace",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px"
-            }}>
-              <span>WAV</span>
-              <span style={{ opacity: 0.35 }}>•</span>
-              <span>Kokoro AI</span>
-              {duration ? <><span style={{ opacity: 0.35 }}>•</span><span>{duration}</span></> : null}
-            </div>
-            {/* Live playback bar */}
-            {isPlaying && (
-              <div style={{
-                width: "100%",
-                height: "2px",
-                background: "rgba(255, 255, 255, 0.08)",
-                borderRadius: "2px",
-                marginTop: "4px",
-                overflow: "hidden"
-              }}>
-                <div style={{
-                  width: `${Math.round(progress * 100)}%`,
-                  height: "100%",
-                  background: "#22c55e",
-                  transition: "width 0.1s linear"
-                }} />
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right: Actions */}
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
-          <button
-            type="button"
-            onClick={handleDownload}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "5px",
-              height: "28px",
-              padding: "0 10px",
-              borderRadius: "6px",
-              background: downloaded ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.05)",
-              color: downloaded ? "#4ade80" : "#d1d5db",
-              fontSize: "12px",
-              fontWeight: "500",
-              border: downloaded ? "1px solid rgba(74, 222, 128, 0.25)" : "1px solid rgba(255, 255, 255, 0.08)",
-              cursor: "pointer",
-              transition: "all 0.15s ease"
-            }}
-            title="Download Audio WAV"
-            onMouseEnter={(e) => {
-              if (!downloaded) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.09)";
-                e.currentTarget.style.color = "#ffffff";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!downloaded) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
-                e.currentTarget.style.color = "#d1d5db";
-              }
-            }}
-          >
-            {downloaded ? <Check size={12} strokeWidth={2.4} /> : <Download size={12} strokeWidth={2.2} />}
-            <span>{downloaded ? "Saved" : "Download"}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleReveal}
-            disabled={revealing}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "5px",
-              height: "28px",
-              padding: "0 10px",
-              borderRadius: "6px",
-              background: revealed ? "rgba(74, 222, 128, 0.12)" : "rgba(255, 255, 255, 0.05)",
-              color: revealed ? "#4ade80" : "#d1d5db",
-              fontSize: "12px",
-              fontWeight: "500",
-              border: revealed ? "1px solid rgba(74, 222, 128, 0.25)" : "1px solid rgba(255, 255, 255, 0.08)",
-              cursor: revealing ? "wait" : "pointer",
-              transition: "all 0.15s ease"
-            }}
-            title="Reveal in Windows Explorer"
-            onMouseEnter={(e) => {
-              if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.09)";
-                e.currentTarget.style.color = "#ffffff";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!revealed) {
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
-                e.currentTarget.style.color = "#d1d5db";
-              }
-            }}
-          >
-            {revealed ? <Check size={12} color="#4ade80" /> : <Folder size={12} />}
-            <span>{revealed ? "Revealed" : revealing ? "Opening..." : "Reveal"}</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ensureFencedCode(content) {
-  if (typeof content !== 'string') return '';
-  if (content.includes('```')) return content;
-
-  const text = content.trim();
-
-  // Pattern 1: Check for path comment with code anywhere in text
-  // e.g. <!-- path: index.html --> or // path: script.py or # path: main.py
-  const fileCommentRegex = /(?:^|\n)((?:<!--|\/\/|#|\/\*)\s*(?:path|filename|file|name):\s*([a-zA-Z0-9_./-]+)\s*(?:-->|\*\/)?[\s\S]*)$/i;
-  const commentMatch = text.match(fileCommentRegex);
-  if (commentMatch && commentMatch[1]) {
-    const filename = commentMatch[2];
-    const ext = filename.split('.').pop().toLowerCase();
-
-    // Media files (PNG, JPG, WAV, etc.) are NOT source code and must NEVER be wrapped in code blocks!
-    const mediaExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'tiff', 'wav', 'mp3', 'ogg', 'flac', 'm4a'];
-    if (mediaExts.includes(ext)) {
-      return text.replace(/(?:^|\n)(?:<!--|\/\/|#|\/\*)\s*(?:path|filename|file|name):\s*[a-zA-Z0-9_./-]+\.(?:png|jpe?g|gif|webp|ico|bmp|tiff|wav|mp3|ogg|flac|m4a)\s*(?:-->|\*\/)?/gi, "").trim();
-    }
-
-    const intro = text.slice(0, text.length - commentMatch[1].length).trim();
-    const codePart = commentMatch[1].trim();
-    const lang = (ext === 'html' || ext === 'htm') ? 'html' : (ext === 'js' ? 'javascript' : (ext === 'py' ? 'python' : ext));
-    const fenced = `\`\`\`${lang}\n${codePart}\n\`\`\``;
-    return intro ? `${intro}\n\n${fenced}` : fenced;
-  }
-
-  // Pattern 2: Check for raw HTML document anywhere in text (<!DOCTYPE html or <html)
-  const htmlStart = text.search(/<!DOCTYPE html|<html/i);
-  if (htmlStart !== -1) {
-    const intro = text.slice(0, htmlStart).trim();
-    const htmlBody = text.slice(htmlStart).trim();
-    const fenced = `\`\`\`html\n${htmlBody}\n\`\`\``;
-    return intro ? `${intro}\n\n${fenced}` : fenced;
-  }
-
-  // Pattern 3: Check for raw SVG
-  if (text.startsWith('<svg') && text.includes('</svg>')) {
-    return `\`\`\`svg\n${text}\n\`\`\``;
-  }
-
-  return content;
-}
-
-export function MarkdownRenderer({ content, onOpenBrowser, isComplete = true, userPrompt = "" }) {
-  if (typeof content !== 'string') return null;
-
-  const pLower = (userPrompt || "").toLowerCase();
-  const hasAudioWords = /\b(?:audio|speech|voice|podcast|voiceover|narration|sound\s*clip|recording|spoken\s*word|speak|read\s*aloud|narrate|tts|text\s*to\s*speech)\b/i.test(pLower);
-  const hasImageWords = /\b(?:image|photo|picture|drawing|illustration|artwork|wallpaper|portrait|graphic|banner|logo|avatar|visual|draw|paint|sketch)\b/i.test(pLower);
-  const asksBoth = (hasAudioWords && hasImageWords) || /\b(?:image\s+and\s+audio|audio\s+and\s+image|both\s+(?:an?\s+)?image\s+and\s+(?:an?\s+)?audio|picture\s+and\s+voice)\b/i.test(pLower);
-
-  const audioOnly = (hasAudioWords && !hasImageWords) && !asksBoth;
-  const imageOnly = (hasImageWords && !hasAudioWords) && !asksBoth;
-
-  const normalizedContent = ensureFencedCode(content);
-  const parts = normalizedContent.split(/(```[\s\S]*?```|\[AUDIO:\s*[\s\S]*?\]|\[IMAGE:\s*[\s\S]*?\]|\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\])/gi);
-  const isTableSeparator = (line) => /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/.test(line.trim());
-  const splitTableRow = (line) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
-
-  return (
-    <div className="markdown-body">
-      {parts.map((part, index) => {
-        if (!part) return null;
-        if (part.length > 4 && part.startsWith("$$") && part.endsWith("$$")) {
-          return <MathFormula key={index} tex={part.slice(2, -2).trim()} display />;
-        }
-        if (part.length > 4 && part.startsWith("\\[") && part.endsWith("\\]")) {
-          return <MathFormula key={index} tex={part.slice(2, -2).trim()} display />;
-        }
-        if (part.startsWith("[AUDIO:") && part.endsWith("]")) {
-          if (imageOnly) return null;
-          const audioMatch = part.match(/\[AUDIO:\s*([\s\S]*?)\]/i);
-          if (audioMatch) {
-            const tagContent = audioMatch[1];
-            const srcM = tagContent.match(/src="([^"]+)"/i);
-            const nameM = tagContent.match(/(?:filename|name)="([^"]+)"/i);
-            const durM = tagContent.match(/duration="([^"]+)"/i);
-            const textM = tagContent.match(/text="([^"]+)"/i);
-            const fname = nameM ? nameM[1].split("/").pop().split("\\").pop() : "speech.wav";
-            const audioSrc = srcM ? srcM[1] : `/tts-outputs/${encodeURIComponent(fname)}`;
-            return (
-              <AudioBlockRenderer
-                key={index}
-                src={audioSrc}
-                filename={fname}
-                duration={durM ? durM[1] : ""}
-                text={textM ? textM[1] : ""}
-              />
-            );
-          }
-        }
-        if (part.startsWith("[IMAGE:") && part.endsWith("]")) {
-          if (audioOnly) return null;
-          const imgMatch = part.match(/\[IMAGE:\s*([\s\S]*?)\]/i);
-          if (imgMatch) {
-            const tagContent = imgMatch[1];
-            const pM = tagContent.match(/prompt="([^"]+)"/i);
-            const fM = tagContent.match(/(?:filename|name)="([^"]+)"/i);
-            const fname = fM ? fM[1].split("/").pop().split("\\").pop() : "image.png";
-            return (
-              <ImageBlockRenderer
-                key={index}
-                src={`/api/output-file?filename=${encodeURIComponent(fname)}`}
-                alt={pM ? pM[1] : ""}
-                filename={fname}
-              />
-            );
-          }
-        }
-        if (part.startsWith("```")) {
-          if (!isComplete) {
-            return null;
-          }
-          let lang = "";
-          let code = "";
-          if (part.endsWith("```")) {
-            const match = part.match(/```(\w*)\n([\s\S]*?)```/);
-            lang = match ? match[1] : "";
-            code = match ? match[2] : part.slice(3, -3);
-          } else {
-            const match = part.match(/```(\w*)\n?([\s\S]*)/);
-            lang = match ? match[1] : "";
-            code = match ? match[2] : part.slice(3);
-          }
-          const isMediaFence = /\.(?:png|jpe?g|webp|gif|ico|bmp|tiff|wav|mp3|ogg|flac|m4a)$/i.test(lang) ||
-            ["png", "jpg", "jpeg", "webp", "gif", "ico", "bmp", "tiff", "wav", "mp3", "ogg", "flac"].includes(lang.toLowerCase().trim()) ||
-            code.includes("<img") || code.includes("[IMAGE:") || code.includes("[AUDIO:") || code.includes("data-generate=") || code.includes("data-prompt=");
-          if (isMediaFence) {
-            return null;
-          }
-          return (
-            <CodeBlockRenderer
-              key={index}
-              code={code}
-              lang={lang}
-              onOpenBrowser={onOpenBrowser}
-              isComplete={isComplete}
-              userPrompt={userPrompt}
-            />
-          );
-        } else {
-          const rawLines = part.split(/\r?\n/);
-          const blocks = [];
-          let currentBlock = null;
-
-          for (let i = 0; i < rawLines.length; i++) {
-            const line = rawLines[i];
-            const trimmed = line.trim();
-
-            if (trimmed.startsWith("|") && i + 1 < rawLines.length && isTableSeparator(rawLines[i + 1])) {
-              if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              const header = splitTableRow(line);
-              const rows = [];
-              i += 2;
-              while (i < rawLines.length && rawLines[i].trim().startsWith("|")) {
-                rows.push(splitTableRow(rawLines[i]));
-                i += 1;
-              }
-              i -= 1;
-              blocks.push({ type: "table", header, rows });
-            } else if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
-              if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              blocks.push({ type: "hr" });
-            } else if (/^!\[(.*?)\]\((.*?)\)$/.test(trimmed)) {
-              if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              if (!audioOnly) {
-                const m = trimmed.match(/^!\[(.*?)\]\((.*?)\)$/);
-                blocks.push({ type: "image_card", alt: m[1], src: m[2] });
-              }
-            } else if (/\[AUDIO:\s*[\s\S]*?\]/i.test(trimmed)) {
-              if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              if (!imageOnly) {
-                const audioMatch = trimmed.match(/\[AUDIO:\s*([\s\S]*?)\]/i);
-                if (audioMatch) {
-                  const tagContent = audioMatch[1];
-                  const srcM = tagContent.match(/src="([^"]+)"/i);
-                  const nameM = tagContent.match(/(?:filename|name)="([^"]+)"/i);
-                  const durM = tagContent.match(/duration="([^"]+)"/i);
-                  const textM = tagContent.match(/text="([^"]+)"/i);
-                  const fname = nameM ? nameM[1].split("/").pop().split("\\").pop() : "speech.wav";
-                  const audioSrc = srcM ? srcM[1] : `/tts-outputs/${encodeURIComponent(fname)}`;
-                  if (!blocks.some(b => b.type === "audio_card" && b.filename === fname)) {
-                    blocks.push({
-                      type: "audio_card",
-                      src: audioSrc,
-                      filename: fname,
-                      duration: durM ? durM[1] : "",
-                      text: textM ? textM[1] : ""
-                    });
-                  }
-                  const remainingText = trimmed.replace(/\[AUDIO:\s*[\s\S]*?\]/i, "").trim();
-                  if (remainingText) {
-                    blocks.push({ type: "p", lines: [remainingText] });
-                  }
-                }
-              }
-            } else if (/^\[IMAGE:\s*prompt="([^"]+)".*?\]$/i.test(trimmed)) {
-              if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              if (!audioOnly) {
-                const pM = trimmed.match(/prompt="([^"]+)"/i);
-                const fM = trimmed.match(/filename="([^"]+)"/i);
-                const fname = fM ? fM[1].split("/").pop().split("\\").pop() : "image.png";
-                if (!blocks.some(b => b.type === "image_card" && b.filename === fname)) {
-                  blocks.push({ type: "image_card", alt: pM ? pM[1] : "", src: `/api/output-file?filename=${encodeURIComponent(fname)}`, filename: fname });
-                }
-              }
-            } else if (/<img\s+[^>]*src=["'](?:assets\/)?([^"']+)["'][^>]*>/i.test(trimmed)) {
-              if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              if (!audioOnly) {
-                const m = trimmed.match(/<img\s+[^>]*src=["'](?:assets\/)?([^"']+)["'][^>]*>/i);
-                const altM = trimmed.match(/alt=["']([^"']+)["']/i);
-                const dataGenM = trimmed.match(/data-generate=["']([^"']+)["']/i);
-                const fname = m ? m[1].split("/").pop().split("\\").pop() : "image.png";
-                if (!blocks.some(b => b.type === "image_card" && b.filename === fname)) {
-                  blocks.push({
-                    type: "image_card",
-                    alt: altM ? altM[1] : (dataGenM ? dataGenM[1] : "Generated image"),
-                    src: `/api/output-file?filename=${encodeURIComponent(fname)}`,
-                    filename: fname
-                  });
-                }
-              }
-            } else if (/^<!--\s*path:\s*[^>]+\s*-->$/i.test(trimmed)) {
-              // Ignore path comments in rendered markdown text
-              continue;
-            } else if (trimmed.startsWith(">")) {
-              const quoteLine = trimmed.replace(/^>\s?/, "");
-              if (currentBlock && currentBlock.type === "quote") {
-                currentBlock.lines.push(quoteLine);
-              } else {
-                if (currentBlock) { blocks.push(currentBlock); }
-                currentBlock = { type: "quote", lines: [quoteLine] };
-              }
-            } else if (trimmed.startsWith("### ")) {
-              if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              blocks.push({ type: "h4", content: trimmed.slice(4) });
-            } else if (trimmed.startsWith("## ")) {
-              if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              blocks.push({ type: "h3", content: trimmed.slice(3) });
-            } else if (trimmed.startsWith("# ")) {
-              if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              blocks.push({ type: "h2", content: trimmed.slice(2) });
-            } else if (trimmed.startsWith("* ") || trimmed.startsWith("- ")) {
-              const itemContent = trimmed.slice(2);
-              if (currentBlock && currentBlock.type === "ul") {
-                currentBlock.items.push(itemContent);
-              } else {
-                if (currentBlock) { blocks.push(currentBlock); }
-                currentBlock = { type: "ul", items: [itemContent] };
-              }
-            } else {
-              const numMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
-              if (numMatch) {
-                const itemContent = numMatch[2];
-                if (currentBlock && currentBlock.type === "ol") {
-                  currentBlock.items.push(itemContent);
-                } else {
-                  if (currentBlock) { blocks.push(currentBlock); }
-                  currentBlock = { type: "ol", items: [itemContent] };
-                }
-              } else if (trimmed === "") {
-                if (currentBlock) { blocks.push(currentBlock); currentBlock = null; }
-              } else {
-                if (currentBlock && currentBlock.type === "p") {
-                  currentBlock.lines.push(line);
-                } else {
-                  if (currentBlock) { blocks.push(currentBlock); }
-                  currentBlock = { type: "p", lines: [line] };
-                }
-              }
-            }
-          }
-          if (currentBlock) {
-            blocks.push(currentBlock);
-          }
-
-          return blocks.map((block, blockIdx) => {
-            switch (block.type) {
-              case "image_card":
-                return <ImageBlockRenderer key={blockIdx} src={block.src} alt={block.alt} filename={block.filename} />;
-              case "audio_card":
-                return <AudioBlockRenderer key={blockIdx} src={block.src} filename={block.filename} duration={block.duration} />;
-              case "h4":
-                return <h4 key={blockIdx}>{parseInlineMarkdown(block.content)}</h4>;
-              case "h3":
-                return <h3 key={blockIdx}>{parseInlineMarkdown(block.content)}</h3>;
-              case "h2":
-                return <h2 key={blockIdx}>{parseInlineMarkdown(block.content)}</h2>;
-              case "ul":
-                return (
-                  <ul key={blockIdx}>
-                    {block.items.map((item, itemIdx) => (
-                      <li key={itemIdx}>{parseInlineMarkdown(item)}</li>
-                    ))}
-                  </ul>
-                );
-              case "ol":
-                return (
-                  <ol key={blockIdx}>
-                    {block.items.map((item, itemIdx) => (
-                      <li key={itemIdx}>{parseInlineMarkdown(item)}</li>
-                    ))}
-                  </ol>
-                );
-              case "table":
-                return (
-                  <div key={blockIdx} className="chat-table-wrap">
-                    <table className="chat-table">
-                      <thead>
-                        <tr>{block.header.map((cell, cellIdx) => <th key={cellIdx}>{parseInlineMarkdown(cell)}</th>)}</tr>
-                      </thead>
-                      <tbody>
-                        {block.rows.map((row, rowIdx) => (
-                          <tr key={rowIdx}>
-                            {block.header.map((_, cellIdx) => <td key={cellIdx}>{parseInlineMarkdown(row[cellIdx] || "")}</td>)}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              case "hr":
-                return <hr key={blockIdx} />;
-              case "quote":
-                return <blockquote key={blockIdx}>{parseInlineMarkdown(block.lines.join(" "))}</blockquote>;
-              case "p": {
-                // A lone bold line such as "**Analysis:**" acts as a section label, so it gets heading spacing
-                const isSectionLabel = block.lines.length === 1 && /^[^\w*]*\*\*[^*]+\*\*:?$/u.test(block.lines[0].trim());
-                // Keep the model's single line breaks (addresses, emails, poems)
-                return (
-                  <p key={blockIdx} className={isSectionLabel ? "md-section-label" : undefined}>
-                    {block.lines.map((line, lineIdx) => (
-                      <React.Fragment key={lineIdx}>
-                        {lineIdx > 0 && <br />}
-                        {parseInlineMarkdown(line.trim())}
-                      </React.Fragment>
-                    ))}
-                  </p>
-                );
-              }
-              default:
-                return null;
-            }
-          });
-        }
-      })}
-    </div>
-  );
-}
 
 export default TextChat;

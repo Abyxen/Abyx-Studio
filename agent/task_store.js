@@ -34,7 +34,7 @@ class TaskStore {
     } catch (_) {}
   }
 
-  createTask({ id, description, agentId = 'coder', dependencies = [], priority = 1, status = 'pending', result = null, error = null, metadata = {} }) {
+  createTask({ id, description, agentId = 'coder', dependencies = [], priority = 1, status = 'pending', result = null, error = null, verification = null, verificationSteps = null, metadata = {} }) {
     const taskId = id || `task_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const task = {
       id: taskId,
@@ -45,6 +45,8 @@ class TaskStore {
       status: status || 'pending', // 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
       result: result || null,
       error: error || null,
+      verification,
+      verificationSteps: Array.isArray(verificationSteps) ? verificationSteps : null,
       createdAt: new Date().toISOString(),
       startedAt: status === 'completed' ? new Date().toISOString() : null,
       completedAt: status === 'completed' ? new Date().toISOString() : null,

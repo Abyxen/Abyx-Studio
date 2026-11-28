@@ -67,6 +67,20 @@ function getHarnessStatus() {
   };
 }
 
+const { AbyxAgentHarness } = require('./openhands_orchestrator');
+const { AgentState, ActionType } = require('./state');
+const { PythonDocRunner } = require('./tools/python_doc_runner');
+const { PlaywrightBrowserTool } = require('./tools/playwright_browser');
+const { ProcessManager } = require('../services/process_manager');
+const { GoalOrchestrator } = require('../agent/goal_orchestrator');
+const { MultiSubagentOrchestrator } = require('../agent/subagent_orchestrator');
+const { InternetResearchTool } = require('./tools/internet_research');
+const { SmartFileEditor } = require('./tools/file_editor');
+const { TerminalTool } = require('./tools/terminal');
+const { PlannerTool } = require('./tools/planner');
+const { PermissionMatrix } = require('./control_flow');
+const { CheckpointManager, TrajectoryTracer } = require('./trajectory_state');
+
 module.exports = {
   harness,
   HarnessContext,
@@ -74,5 +88,20 @@ module.exports = {
   SEAMS,
   getHarnessStatus,
   HarnessSessionStore,
-  HarnessAgentLoop
+  HarnessAgentLoop,
+  AbyxAgentHarness,
+  AgentState,
+  ActionType,
+  TerminalTool,
+  PlannerTool,
+  PermissionMatrix,
+  PythonDocRunner,
+  PlaywrightBrowserTool,
+  ProcessManager,
+  GoalOrchestrator,
+  MultiSubagentOrchestrator,
+  InternetResearchTool,
+  SmartFileEditor,
+  CheckpointManager,
+  TrajectoryTracer
 };

@@ -94,7 +94,7 @@ test('Orchestrator: Single-Agent vs Multi-Agent Execution Routing', async () => 
   const simpleReport = await orchestrator.orchestrate({
     goal: 'Read and explain package.json configuration'
   });
-  assert.equal(simpleReport.status, 'success');
+  assert.equal(simpleReport.status, 'requires_verification');
   assert.equal(simpleReport.mode, 'single_agent', 'should use single_agent mode for simple tasks');
   assert.equal(simpleReport.totalTasks, 1);
 
@@ -102,7 +102,7 @@ test('Orchestrator: Single-Agent vs Multi-Agent Execution Routing', async () => 
   const multiReport = await orchestrator.orchestrate({
     goal: 'Build and test multi-agent payment processing pipeline with full architecture review'
   });
-  assert.equal(multiReport.status, 'success');
+  assert.equal(multiReport.status, 'requires_verification');
   assert.ok(multiReport.totalTasks >= 3, 'should decompose into multi-agent DAG');
   assert.equal(multiReport.completedTasks, multiReport.totalTasks);
 });
@@ -122,11 +122,11 @@ test('Orchestrator: Dependency-Aware DAG Execution & Topological Sequencing', as
     goal: 'Custom DAG execution',
     customTasks,
     onEvent: (type, data) => {
-      if (type === 'task:complete') executionOrder.push(data.taskId);
+      if (type === 'task:unverified') executionOrder.push(data.taskId);
     }
   });
 
-  assert.equal(report.status, 'success');
+  assert.equal(report.status, 'requires_verification');
   assert.equal(report.completedTasks, 4);
 
   // Verify dependency ordering: step_1 before step_2, step_2 before 3a & 3b
@@ -223,7 +223,7 @@ test('Orchestrator: Durable SQLite Checkpointing & Interrupted Workflow Recovery
   // 2. Recover the interrupted workflow
   const recoveredReport = await orchestrator.recoverWorkflow(runId);
 
-  assert.equal(recoveredReport.status, 'success', 'recovered workflow should run to completion');
+  assert.equal(recoveredReport.status, 'requires_verification', 'recovered workflow must remain unverified without evidence');
   assert.equal(recoveredReport.completedTasks, 2, 'all tasks including recovered one should be completed');
 
   // Verify the previously completed task preserved its result
@@ -247,7 +247,7 @@ test('Orchestrator: Shared Memory Findings & Structured Result Aggregation', asy
     ]
   });
 
-  assert.equal(report.status, 'success');
+  assert.equal(report.status, 'requires_verification');
   assert.ok(typeof report.summary === 'string', 'report must have formatted summary');
   assert.match(report.summary, /Multi-Agent Execution Summary/);
   assert.match(report.summary, /PLANNER/);

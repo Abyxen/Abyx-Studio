@@ -164,17 +164,21 @@ async function invokeSubagent({ subagentId, taskPrompt, context = '', model = 'a
           }
         } catch (fbErr) {}
       }
-      // If neither ollama nor cloud provider answered, return structured subagent report
+      // A persona and a formatted string are not a completed subagent run.  Keep
+      // this state explicit so callers can retry, select a provider, or show a
+      // real error instead of displaying a fabricated success report.
       resolve({
-        ok: true,
+        ok: false,
+        status: 'blocked',
         subagent: {
           id: subagent.id,
           name: subagent.name,
           role: subagent.role
         },
-        model: 'simulated',
+        model: null,
         duration_ms: Date.now() - t0,
-        response: `### [${subagent.name}] Analysis Complete\n\n**Role**: ${subagent.role}\n**Task**: ${taskPrompt}\n\n${context ? `**Observed Context**:\n${context}\n\n` : ''}**Findings & Recommendation**:\n- Subagent dispatched successfully.\n- Evaluated input against system directives.\n- All security, structure, and persona constraints validated.`
+        error: `No configured model provider was reachable for subagent '${subagent.id}'.`,
+        response: null
       });
     });
 

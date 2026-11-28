@@ -160,7 +160,7 @@ export default function HarnessControlsDrawer({ isOpen, onClose, onConfigSaved }
               </span>
             </div>
             <p className="text-[11px] text-neutral-300 leading-relaxed">
-              {specs?.cpu || "AMD Ryzen 9 8940HX with Radeon Graphics"} · {specs?.cores || 16} cores · {specs?.ramGb ? `${specs.ramGb} GB RAM` : "31 GB RAM"} · {specs?.gpu || "NVIDIA GeForce RTX 5060 Laptop GPU"} ({specs?.vramGb ? `${specs.vramGb} GB VRAM` : "8 GB VRAM"})
+              {specs?.cpu || "Local CPU Processor"} · {specs?.cores || 8} cores · {specs?.ramGb ? `${specs.ramGb} GB RAM` : "System RAM"} · {specs?.gpu || "Local Neural Engine"} ({specs?.vramGb ? `${specs.vramGb} GB VRAM` : "Accelerated"})
             </p>
             <div className="flex flex-wrap gap-1.5 pt-1">
               <span className="px-2 py-0.5 text-[10px] rounded bg-white/5 border border-white/10 text-neutral-400">Recommended</span>

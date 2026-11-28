@@ -1,0 +1,12 @@
+{
+  "llama_server": {
+    "id": "llama_server",
+    "command": "C:\\Users\\abira\\Documents\\Local Ai studio Abyx\\app\\llm-backend\\win\\cuda\\llama-server.exe -m C:\\Users\\abira\\Documents\\Local Ai studio Abyx\\app\\llm-models\\AbyxV2 9B.gguf --host 127.0.0.1 --port 10086 -ngl 99 -c 32768",
+    "pid": 10752,
+    "status": "RUNNING",
+    "startTime": "2026-11-26T21:32:31.756Z",
+    "endTime": null,
+    "exitCode": null,
+    "logFile": "C:\\Users\\abira\\Documents\\Local Ai studio Abyx\\.abyx_processes\\llama_server.log"
+  }
+}

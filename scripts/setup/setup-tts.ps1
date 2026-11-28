@@ -1,12 +1,23 @@
 # Local AI Studio - Kokoro TTS setup for Windows
+param([string]$AppDir = "")
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $rootDir = Split-Path -Parent (Split-Path -Parent $scriptDir)
-$appDir = Join-Path $rootDir "app"
+$appDir = if ($AppDir) { $AppDir } else { Join-Path $rootDir "app" }
 $toolsDir = Join-Path $appDir "tools"
 $nodeDir = Join-Path $toolsDir "node-win"
 $nodeExe = Join-Path $nodeDir "node.exe"
 $npmCmd = Join-Path $nodeDir "npm.cmd"
+
+# Check rootDir for bundled Node.js fallback if target toolsDir doesn't have it yet
+if (-not (Test-Path $nodeExe)) {
+    $rootNodeExe = Join-Path $rootDir "app\tools\node-win\node.exe"
+    if (Test-Path $rootNodeExe) {
+        $nodeDir = Join-Path $rootDir "app\tools\node-win"
+        $nodeExe = $rootNodeExe
+        $npmCmd = Join-Path $nodeDir "npm.cmd"
+    }
+}
 $runtimeDir = Join-Path $appDir "tts-runtime"
 $modelsDir = Join-Path $appDir "tts-models"
 $outputsDir = Join-Path $appDir "tts-outputs"
@@ -55,7 +66,12 @@ try {
     $env:ONNXRUNTIME_NODE_INSTALL_CUDA = "skip"
     $installMode = if (Test-Path (Join-Path $runtimeDir "package-lock.json")) { "ci" } else { "install" }
     Print-Info "Installing pinned kokoro-js dependencies into app/tts-runtime..."
-    & $npmCmd $installMode --prefer-online --no-audit --no-fund --loglevel=error
+    $npmCli = Join-Path $nodeDir "node_modules\npm\bin\npm-cli.js"
+    if (Test-Path $npmCli) {
+        & $nodeExe $npmCli $installMode --prefer-online --no-audit --no-fund --loglevel=error
+    } else {
+        & $npmCmd $installMode --prefer-online --no-audit --no-fund --loglevel=error
+    }
     if ($LASTEXITCODE -ne 0) {
         Print-Fail "kokoro-js install failed."
         exit 1

@@ -1,0 +1,50 @@
+{
+  "id": "chat_1795591821510",
+  "title": "yo",
+  "model": "Inkling-2-Mini-UD-Q4_K_M.gguf",
+  "messages": [
+    {
+      "role": "user",
+      "content": "yo"
+    },
+    {
+      "role": "assistant",
+      "content": "Hey! What are we working on today?",
+      "reasoning": "The user just said \"yo\" — a greeting. Per rule, respond casually and briefly in one sentence. No emojis. Don't regurgitate instructions or pitch menus. Keep it short.",
+      "generationStats": {
+        "status": "complete",
+        "tokens": 62,
+        "tokensPerSecond": 0.4959591329674424,
+        "seconds": 125.01030000000029,
+        "finishReason": "stop"
+      },
+      "routedModel": {
+        "providerId": "local",
+        "providerName": "Local GPU",
+        "selectedModel": "Inkling-2-Mini-UD-Q4_K_M.gguf",
+        "selectedModelName": "Inkling-2-Mini-UD-Q4_K_M",
+        "reason": "Executed strictly on local RTX 5060 GPU"
+      },
+      "webSources": []
+    },
+    {
+      "role": "user",
+      "content": "make me a landinag page for Abyz with everything you can find"
+    },
+    {
+      "role": "assistant",
+      "content": "I'll build a polished landing page for Abyx — hero, features, terminal demo, stats, and CTA — all in one self-contained file.\n\n```html\n<!-- path: abyx_landing_page.html -->\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\" />\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n<title>Abyx — Local AI Studio & Autonomous Agents</title>\n<meta name=\"description\" content=\"Abyx is a local AI studio building autonomous agents and intelligent tools that run on your machine.\" />\n<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\" />\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin />\n<link href=\"https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap\" rel=\"stylesheet\" />\n<style>\n  :root{\n    --bg:#07090f;\n    --bg-2:#0c101a;\n    --panel:#111625;\n    --line:rgba(255,255,255,.08);\n    --text:#eef1f8;\n    --muted:#9aa3b5;\n    --accent:#6ee7ff;\n    --accent-2:#a78bfa;\n    --accent-3:#34d399;\n    --radius:18px;\n  }\n  *{margin:0;padding:0;box-sizing:border-box}\n  html{scroll-behavior:smooth}\n  body{\n    background:var(--bg);\n    color:var(--text);\n    font-family:'Inter',system-ui,sans-serif;\n    overflow-x:hidden;\n    line-height:1.6;\n  }\n  ::selection{background:rgba(110,231,255,.25)}\n\n  /* ---------- ambient background ---------- */\n  .orb{position:fixed;border-radius:50%;filter:blur(120px);opacity:.35;pointer-events:none;z-index:0}\n  .orb-1{width:520px;height:520px;background:#1d4ed8;top:-180px;left:-160px;animation:drift 22s ease-in-out infinite alternate}\n  .orb-2{width:460px;height:460px;background:#7c3aed;bottom:-200px;right:-140px;animation:drift 26s ease-in-out infinite alternate-reverse}\n  .orb-3{width:340px;height:340px;background:#0e7490;top:40%;left:55%;opacity:.22;animation:drift 30s ease-in-out infinite alternate}\n  @keyframes drift{from{transform:translate(0,0) scale(1)}to{transform:translate(60px,50px) scale(1.12)}}\n\n  .grid-lines{position:fixed;inset:0;z-index:0;pointer-events:none;\n    background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);\n    background-size:64px 64px;\n    mask-image:radial-gradient(ellipse at 50% 0%,black 30%,transparent 75%);\n  }\n\n  main{position:relative;z-index:1}\n\n  /* ---------- nav ---------- */\n  header{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(7,9,15,.72);border-bottom:1px solid var(--line)}\n  .nav{max-width:1180px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:16px 24px}\n  .logo{display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--text);font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:1.25rem;letter-spacing:-.02em}\n  .logo-mark{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:grid;place-items:center;box-shadow:0 0 24px rgba(110,231,255,.35)}\n  .logo em{font-style:normal;color:var(--accent)}\n  .nav-links{display:flex;gap:28px;align-items:center}\n  .nav-links a{color:var(--muted);text-decoration:none;font-size:.92rem;transition:color .2s}\n  .nav-links a:hover{color:var(--text)}\n  .btn{display:inline-",
+      "generationStats": {
+        "status": "complete",
+        "tokens": 1836,
+        "tokensPerSecond": 7.581632627778997,
+        "seconds": 259.1348999999999
+      },
+      "reasoning": "The user wants a landing page for \"Abyx\" (they wrote \"Abyz\" but context says Project: \"abyx\"). They want \"everything you can find\" — meaning build a rich, complete landing page using the workspace/project info. This is an explicit request to build a website/app, so I should generate code in triple-backtick fences with a path comment on the first line inside the code block.\n\nI don't have actual file access tools here (no tool definitions provided), so I need to produce the HTML directly as code in my response. The harness says autonomous access to create files, but no tools are actually available in this environment — I should just provide the complete HTML code with a path comment.\n\nLet me design an impressive landing page for \"Abyx\" — a local AI studio / assistant brand. Dark futuristic aesthetic, hero, features, stats, capabilities, tech stack, pricing maybe, CTA, footer. Include embedded media directives inside img elements per rule 4.\n\nI'll make it self-contained with embedded CSS/JS: smooth scroll nav, animated gradient hero, floating orbs, feature cards, counter animation on scroll, reveal-on-scroll via IntersectionObserver, maybe a terminal mockup typing effect, FAQ accordion. No emojis. Use img tags with data-generate directives for visual assets (hero image, etc.).\n\nLet me write it carefully and completely. Keep it polished: custom fonts via Google Fonts CDN (allowed? embedded CSS/JS — using CDN links is fine typically; but self-contained... The mandate says complete self-contained with embedded CSS and JS. Using a Google Fonts link is common practice; I'll include it as progressive enhancement).\n\nI'll build:\n- Nav with blur backdrop, logo (SVG mark), links, CTA button\n- Hero: badge, big headline with gradient text, subtext, two buttons, hero visual card (img with data-generate), stats row with counters\n- Marquee/logos strip? Maybe a \"capabilities\" grid\n- Features section: cards with SVG icons\n- Terminal mockup with typing animation\n- How it works / steps\n- Stats band\n- CTA + footer\n\nJS: IntersectionObserver reveals, counters, typing effect, accordion FAQ maybe. Keep reasonable but rich.\n\nNo emojis. Path comment first line inside code fence: <!-- path: abyx_landing_page.html -->",
+      "thinkingDuration": 70.77580000000027
+    }
+  ],
+  "timestamp": 1795593455929,
+  "createdAt": "2026-11-25T07:57:35.929Z",
+  "updatedAt": "2026-11-25T07:57:35.930Z"
+}

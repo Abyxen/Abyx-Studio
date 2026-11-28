@@ -723,7 +723,7 @@ function getCombinedModelList() {
 /**
  * Intelligent reasoning-based model router.
  * Evaluates prompt reasoning depth, coding logic, and analytical complexity.
- * Strictly uses user-configured cloud providers (with valid keys) or the local RTX 5060 engine.
+ * Strictly uses user-configured cloud providers (with valid keys) or the local inference engine.
  */
 function selectBestModelForTask(prompt = '', options = {}) {
   const { isRag = false, hasWebSearch = false, hasAttachments = false, profileId = 'prof_default', isOllamaLive = false, isLocalReady = true } = options;
@@ -827,9 +827,9 @@ function selectBestModelForTask(prompt = '', options = {}) {
       providerName: 'Local AI Engine',
       selectedModel: 'local',
       model: 'local',
-      selectedModelName: 'Local RTX 5060 (Reasoning Mode)',
+      selectedModelName: 'Local Inference (Reasoning Mode)',
       category: 'reasoning',
-      reason: `High reasoning task (Score: ${reasoningScore}/100) - executed on local RTX 5060 with step-by-step reasoning`
+      reason: `High reasoning task (Score: ${reasoningScore}/100) - executed on local accelerator with step-by-step reasoning`
     };
   }
 
@@ -841,10 +841,10 @@ function selectBestModelForTask(prompt = '', options = {}) {
         providerName: 'Local AI Engine',
         selectedModel: 'local',
         model: 'local',
-        selectedModelName: 'Local RTX 5060 (Fast Reflex)',
+        selectedModelName: 'Local Inference (Fast Reflex)',
         category: 'instant',
         isBasic: true,
-        reason: 'Instant sub-second response on local RTX 5060 GPU'
+        reason: 'Instant sub-second response on local accelerator'
       };
     }
     const fastCloud =
@@ -871,15 +871,15 @@ function selectBestModelForTask(prompt = '', options = {}) {
 
   if (anyConfiguredCloud) return anyConfiguredCloud;
 
-  // 4. Default: Local Model on RTX 5060 (100% private, zero cost, GPU-accelerated)
+  // 4. Default: Local Model on Local GPU/CPU (100% private, zero cost, GPU-accelerated)
   return {
     providerId: 'local',
     providerName: 'Local AI Engine',
     selectedModel: 'local',
     model: 'local',
-    selectedModelName: 'Local RTX 5060 Model',
+    selectedModelName: 'Local Model',
     category: 'general',
-    reason: 'Executed securely on local RTX 5060 GPU'
+    reason: 'Executed securely on local accelerator'
   };
 }
 

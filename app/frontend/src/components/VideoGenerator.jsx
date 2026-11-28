@@ -447,7 +447,7 @@ export default function VideoGenerator({
               </button>
               {openMenu === "model" && (
                 <div className="chat-model-menu" role="menu" style={{ minWidth: "280px" }}>
-                  <div className="chat-model-menu-label">Local Video Models (RTX 5060)</div>
+                  <div className="chat-model-menu-label">Local Video Models</div>
                   {models.local && models.local.length > 0 ? (
                     models.local.map((m) => {
                       const isSelected = selectedModel === m.filename || selectedModel === m.id;
@@ -612,7 +612,7 @@ export default function VideoGenerator({
                 <Loader2 size={36} className="images-picker-spin" style={{ color: "var(--md-sys-color-primary)", margin: "0 auto 16px" }} />
                 <h3 style={{ margin: "0 0 8px 0", fontSize: "1.1rem" }}>Generating video in motion...</h3>
                 <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--md-sys-color-outline)" }}>
-                  Synthesizing motion frames with Wan 2.1 on RTX 5060 ({generationProgress}%)
+                  Synthesizing motion frames on local accelerator ({generationProgress}%)
                 </p>
               </div>
             ) : (

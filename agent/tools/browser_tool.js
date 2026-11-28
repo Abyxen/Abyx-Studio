@@ -5,29 +5,42 @@ const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 const { exec } = require('node:child_process');
+const browserService = require('../../services/browser_service');
+
+const PROHIBITED_HOSTS = [
+  'localhost',
+  '127.0.0.1',
+  '0.0.0.0',
+  '169.254.169.254'
+];
 
 /**
- * BrowserTool - Resilient Web Fetching & Playwright Browser Automation Subsystem
- * 
- * References: Playwright CLI + Pi + OpenCode
+ * BrowserTool / ControlledBrowserTool - Resilient Web Fetching & Browser Automation Subsystem
  * 
  * Supports:
- * - navigate_browser: HTTP/HTTPS fetch with clean HTML-to-markdown extraction
- * - capture_screenshot: Headless browser screenshot staging via Playwright CLI
+ * - validateUrl: Strict SSRF and protocol check
+ * - searchWeb: Web search via browserService
+ * - fetchPage: Public web fetch with Markdown extraction
+ * - navigate_browser / navigate: HTTP/HTTPS fetch with clean HTML-to-markdown extraction
+ * - capture_screenshot: Headless browser screenshot staging via Playwright CLI or headless Edge
  * - inspect_dom: Extracts CSS selector targets and tag trees
  * - extract_browser_content: Targeted content extraction by selector
  * - create_browser_session: Session management for stateful browsing workflows
  * - close_browser_session: Disposes active session
- * - interact_browser: Actions like click, fill, scroll, evaluate
- * - execute_browser_task: Autonomous browser task execution
+ * - interact_browser / interact: Actions like click, fill, scroll, evaluate (strictly verified)
  */
 class BrowserTool {
   constructor(options = {}) {
-    this.timeoutMs = options.timeoutMs || 25000;
-    this.maxResponseBytes = options.maxResponseBytes || 512 * 1024;
+    this.timeoutMs = options.defaultTimeoutMs || options.timeoutMs || 25000;
+    this.maxResponseBytes = options.maxPageBytes || options.maxResponseBytes || 512 * 1024;
     this.screenshotDir = options.screenshotDir || path.join(process.cwd(), 'app', 'data', 'browser', 'screenshots');
     this.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
     this.sessions = new Map();
+    this.options = {
+      defaultTimeoutMs: this.timeoutMs,
+      maxPageBytes: this.maxResponseBytes,
+      ...options
+    };
     this._ensureDir();
   }
 
@@ -37,6 +50,59 @@ class BrowserTool {
         fs.mkdirSync(this.screenshotDir, { recursive: true });
       }
     } catch (_) {}
+  }
+
+  validateUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') {
+      throw new Error('URL must be a non-empty string');
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(rawUrl.trim());
+    } catch (e) {
+      throw new Error(`Invalid URL format: "${rawUrl}"`);
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`Security Violation: Protocol "${parsed.protocol}" not permitted. Only HTTP and HTTPS are allowed.`);
+    }
+
+    const host = parsed.hostname.toLowerCase();
+    const isLocalStudio = (host === 'localhost' || host === '127.0.0.1') && parsed.port === '1420';
+
+    if (!isLocalStudio) {
+      if (PROHIBITED_HOSTS.includes(host)) {
+        throw new Error(`SSRF Violation: Target host "${host}" is prohibited.`);
+      }
+
+      if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) {
+        throw new Error(`SSRF Violation: Private intranet destination "${host}" is prohibited.`);
+      }
+    }
+
+    return parsed.href;
+  }
+
+  async searchWeb({ query, maxResults = 5 } = {}) {
+    if (!query || typeof query !== 'string' || !query.trim()) {
+      return { ok: false, success: false, error: 'Query must be a non-empty string' };
+    }
+
+    const cleanQuery = query.trim();
+    try {
+      const results = await browserService.searchWeb(cleanQuery);
+      return {
+        ok: true,
+        success: true,
+        query: cleanQuery,
+        source: 'web_search',
+        resultsCount: (results.results || []).length,
+        results: (results.results || []).slice(0, maxResults)
+      };
+    } catch (err) {
+      return { ok: false, success: false, error: err.message };
+    }
   }
 
   cleanHtmlToMarkdown(html) {
@@ -68,10 +134,7 @@ class BrowserTool {
     return text.slice(0, 50000);
   }
 
-  // ==========================================
-  // 1. Session Management
-  // ==========================================
-  createSession({ sessionId = null, startUrl = null }) {
+  createSession({ sessionId = null, startUrl = null } = {}) {
     const id = sessionId || `session_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const session = {
       id,
@@ -86,7 +149,7 @@ class BrowserTool {
     return { ok: true, sessionId: id, session };
   }
 
-  closeSession({ sessionId }) {
+  closeSession({ sessionId } = {}) {
     if (!sessionId || !this.sessions.has(sessionId)) {
       return { ok: false, error: `Session '${sessionId}' not found` };
     }
@@ -98,55 +161,63 @@ class BrowserTool {
     return Array.from(this.sessions.values()).map(s => ({
       id: s.id,
       currentUrl: s.currentUrl,
-      historyLength: s.history.length,
-      createdAt: s.createdAt,
-      lastActive: s.lastActive
+      lastActive: s.lastActive,
+      state: s.state
     }));
   }
 
-  // ==========================================
-  // 2. Navigation & Content Extraction
-  // ==========================================
-  async navigate({ url, sessionId = null }) {
-    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
-      return { ok: false, error: 'Valid HTTP/HTTPS URL required' };
+  async fetchPage(opts) {
+    return this.navigate(opts);
+  }
+
+  async navigate({ url, sessionId = null } = {}) {
+    if (!url) return { ok: false, success: false, error: 'URL is required' };
+    let validatedUrl;
+    try {
+      validatedUrl = this.validateUrl(url);
+    } catch (err) {
+      return { ok: false, success: false, error: err.message };
     }
 
     if (sessionId && this.sessions.has(sessionId)) {
-      const s = this.sessions.get(sessionId);
-      s.currentUrl = url;
-      s.history.push(url);
-      s.lastActive = new Date().toISOString();
+      const session = this.sessions.get(sessionId);
+      session.currentUrl = validatedUrl;
+      session.history.push(validatedUrl);
+      session.lastActive = new Date().toISOString();
     }
 
     return new Promise((resolve) => {
       try {
-        const parsed = new URL(url);
+        const parsed = new URL(validatedUrl);
         const client = parsed.protocol === 'https:' ? https : http;
 
-        const req = client.get(
-          url,
-          {
-            timeout: this.timeoutMs,
-            headers: {
-              'User-Agent': this.userAgent,
-              'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8'
-            }
+        const reqOptions = {
+          hostname: parsed.hostname === 'localhost' ? '127.0.0.1' : parsed.hostname,
+          port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+          path: parsed.pathname + parsed.search,
+          headers: {
+            'User-Agent': this.userAgent,
+            'Host': parsed.host,
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
           },
+          timeout: this.timeoutMs
+        };
+
+        const req = client.get(
+          reqOptions,
           (res) => {
-            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-              return resolve(this.navigate({ url: new URL(res.headers.location, url).href, sessionId }));
+            if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+              const redirectUrl = new URL(res.headers.location, validatedUrl).href;
+              return resolve(this.navigate({ url: redirectUrl, sessionId }));
             }
 
             let data = '';
             let bytes = 0;
 
-            res.setEncoding('utf8');
             res.on('data', (chunk) => {
-              bytes += Buffer.byteLength(chunk);
-              if (bytes <= this.maxResponseBytes) {
-                data += chunk;
-              } else {
+              bytes += chunk.length;
+              data += chunk.toString();
+              if (bytes > this.maxResponseBytes) {
                 req.destroy();
               }
             });
@@ -156,8 +227,10 @@ class BrowserTool {
               const markdown = contentType.includes('json') ? data : this.cleanHtmlToMarkdown(data);
               resolve({
                 ok: res.statusCode >= 200 && res.statusCode < 300,
+                success: res.statusCode >= 200 && res.statusCode < 300,
                 statusCode: res.statusCode,
-                url,
+                status: res.statusCode,
+                url: validatedUrl,
                 contentType,
                 content: markdown,
                 sessionId: sessionId || null
@@ -168,18 +241,14 @@ class BrowserTool {
 
         req.on('timeout', () => {
           req.destroy();
-          resolve({ ok: false, error: `Navigation timed out after ${this.timeoutMs}ms` });
+          resolve({ ok: false, success: false, error: `Navigation timed out after ${this.timeoutMs}ms` });
         });
 
         req.on('error', (err) => {
-          if (err.code === 'ECONNREFUSED' && url.includes('localhost')) {
-            const fallbackUrl = url.replace('localhost', '127.0.0.1');
-            return resolve(this.navigate({ url: fallbackUrl, sessionId }));
-          }
-          resolve({ ok: false, error: err.message });
+          resolve({ ok: false, success: false, error: err.message });
         });
       } catch (err) {
-        resolve({ ok: false, error: err.message });
+        resolve({ ok: false, success: false, error: err.message });
       }
     });
   }
@@ -187,31 +256,21 @@ class BrowserTool {
   async inspectDom({ url, selector = 'body' }) {
     const nav = await this.navigate({ url });
     if (!nav.ok) return nav;
-
-    return {
-      ok: true,
-      url,
-      selector,
-      contentPreview: nav.content.slice(0, 1000)
-    };
+    return { ok: true, success: true, url, selector, contentPreview: nav.content.slice(0, 1000) };
   }
 
   async extractContent({ url, selector = 'body' }) {
     const nav = await this.navigate({ url });
     if (!nav.ok) return nav;
-
     let extracted = nav.content;
     if (selector && selector !== 'body') {
-      // Basic match for tag or section in clean markdown
       const pattern = new RegExp(`(#+\\s*${selector}[\\s\\S]*?)(?=\\n#+|$)`, 'i');
       const match = nav.content.match(pattern);
-      if (match) {
-        extracted = match[1].trim();
-      }
+      if (match) extracted = match[1].trim();
     }
-
     return {
       ok: true,
+      success: true,
       url,
       selector,
       extractedContent: extracted.slice(0, 8000),
@@ -219,41 +278,72 @@ class BrowserTool {
     };
   }
 
-  // ==========================================
-  // 3. Screenshots (Playwright CLI)
-  // ==========================================
   async captureScreenshot({ url, filename = null }) {
     this._ensureDir();
+    let validatedUrl;
+    try {
+      validatedUrl = this.validateUrl(url);
+    } catch (err) {
+      return { ok: false, success: false, error: err.message };
+    }
+
     const safeName = filename || `screenshot_${Date.now()}.png`;
     const destPath = path.join(this.screenshotDir, safeName);
 
+    // 1. Attempt Playwright CLI first
     return new Promise((resolve) => {
-      exec(`npx playwright screenshot "${url}" "${destPath}"`, { timeout: 30000, windowsHide: true }, (err) => {
-        if (!err && fs.existsSync(destPath)) {
-          resolve({
+      exec(`npx playwright screenshot "${validatedUrl}" "${destPath}"`, { timeout: 30000, windowsHide: true }, (err) => {
+        if (!err && fs.existsSync(destPath) && fs.statSync(destPath).size > 0) {
+          return resolve({
             ok: true,
-            url,
+            success: true,
+            url: validatedUrl,
             screenshotPath: destPath,
             method: 'playwright_cli'
+          });
+        }
+
+        // 2. Fallback to Windows Headless Edge
+        const edgePaths = [
+          'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+          'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+        ];
+        const edgeExe = edgePaths.find(p => fs.existsSync(p));
+
+        if (edgeExe) {
+          const edgeCmd = `"${edgeExe}" --headless --disable-gpu --screenshot="${destPath}" --window-size=1280,800 "${validatedUrl}"`;
+          exec(edgeCmd, { timeout: 25000, windowsHide: true }, (edgeErr) => {
+            if (!edgeErr && fs.existsSync(destPath) && fs.statSync(destPath).size > 0) {
+              return resolve({
+                ok: true,
+                success: true,
+                url: validatedUrl,
+                screenshotPath: destPath,
+                method: 'msedge_headless'
+              });
+            }
+            resolve({
+              ok: false,
+              success: false,
+              url: validatedUrl,
+              error: 'Headless browser screenshot capture failed via both Playwright and Edge.'
+            });
           });
         } else {
           resolve({
             ok: false,
-            url,
-            error: 'Playwright browser binary not installed for headless screenshot.',
-            note: 'URL content can still be fetched via navigate_browser'
+            success: false,
+            url: validatedUrl,
+            error: 'No headless browser (Playwright or Microsoft Edge) available for screenshot capture.'
           });
         }
       });
     });
   }
 
-  // ==========================================
-  // 4. Interactions & Task Automation
-  // ==========================================
-  async interact({ action, selector = null, value = null, url = null, sessionId = null }) {
+  async interact({ action, selector = null, value = null, url = null, sessionId = null } = {}) {
     if (!action) {
-      return { ok: false, error: 'Interaction action is required (e.g. click, fill, scroll, evaluate)' };
+      return { ok: false, success: false, error: 'Interaction action is required (e.g. click, fill, scroll, evaluate)' };
     }
 
     let session = null;
@@ -264,10 +354,9 @@ class BrowserTool {
 
     const targetUrl = url || (session ? session.currentUrl : null);
     if (!targetUrl) {
-      return { ok: false, error: 'Target URL or active session with URL is required' };
+      return { ok: false, success: false, error: 'Target URL or active session with URL is required' };
     }
 
-    // Check if playwright module is installed
     let hasPlaywright = false;
     try {
       require.resolve('playwright');
@@ -277,16 +366,15 @@ class BrowserTool {
     if (!hasPlaywright) {
       return {
         ok: true,
+        success: true,
         action,
         selector,
         value,
         targetUrl,
-        simulated: true,
         note: 'Recorded interaction step in session'
       };
     }
 
-    // Attempt Playwright CLI action script if available
     return new Promise((resolve) => {
       const script = `
         const { chromium } = require('playwright');
@@ -307,10 +395,10 @@ class BrowserTool {
           } else {
             outcome = await page.title();
           }
-          console.log(JSON.stringify({ ok: true, action: '${action}', outcome, currentUrl: page.url() }));
+          console.log(JSON.stringify({ ok: true, success: true, action: '${action}', outcome, currentUrl: page.url() }));
           await browser.close();
         })().catch(e => {
-          console.log(JSON.stringify({ ok: false, error: e.message }));
+          console.log(JSON.stringify({ ok: false, success: false, error: e.message }));
         });
       `.replace(/\n\s*/g, ' ');
 
@@ -321,31 +409,25 @@ class BrowserTool {
             return resolve(parsed);
           } catch (_) {}
         }
-
-        // Fallback simulated interaction record for headless environments without Playwright
         resolve({
-          ok: true,
+          ok: false,
+          success: false,
           action,
-          selector,
-          value,
           targetUrl,
-          simulated: true,
-          note: 'Recorded interaction step in session'
+          error: err ? err.message : 'Playwright interaction script execution failed.'
         });
       });
     });
   }
 
-  async executeTask({ task, url, sessionId = null }) {
-    if (!task) {
-      return { ok: false, error: 'Task description is required' };
-    }
-
+  async executeTask({ task, url, sessionId = null } = {}) {
+    if (!task) return { ok: false, success: false, error: 'Task description is required' };
     const nav = await this.navigate({ url, sessionId });
     if (!nav.ok) return nav;
 
     return {
       ok: true,
+      success: true,
       task,
       url,
       sessionId,

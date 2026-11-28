@@ -122,11 +122,11 @@ test('Orchestrator executes multi-agent DAG workflow to completion', async () =>
     onEvent: (type, data) => events.push(type)
   });
 
-  assert.strictEqual(report.status, 'success');
+  assert.strictEqual(report.status, 'requires_verification');
   assert.strictEqual(report.totalTasks, 2);
   assert.strictEqual(report.completedTasks, 2);
   assert.ok(events.includes('orchestration:start'));
   assert.ok(events.includes('orchestration:plan'));
-  assert.ok(events.includes('task:complete'));
+  assert.ok(events.includes('task:unverified'));
   assert.ok(events.includes('orchestration:done'));
 });

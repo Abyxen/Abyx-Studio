@@ -1,0 +1,36 @@
+{
+  "id": "chat_1795518848100",
+  "title": "make me an audio talking about fire",
+  "model": "AbyxV2 9B.gguf",
+  "messages": [
+    {
+      "role": "user",
+      "content": "make me an audio talking about fire"
+    },
+    {
+      "role": "assistant",
+      "content": "[AUDIO: text=\"Fire is a rapid oxidation reaction that releases heat and light. It requires three elements to sustain itself, often called the fire triangle: fuel, oxygen, and heat. Without any one of these components, the fire will eventually die out. Different types of fuels burn at different temperatures and rates, from dry wood which burns relatively quickly to oil or gasoline which can smolder for long periods due to their higher energy density.\", filename=\"fire_discussion.wav\"]",
+      "reasoning": "",
+      "thinkingDuration": 0,
+      "generationStats": {
+        "status": "complete",
+        "tokens": 96,
+        "tokensPerSecond": 12.565353062613024,
+        "seconds": 9.463626,
+        "finishReason": "stop",
+        "truncated": false
+      },
+      "routedModel": {
+        "providerId": "local",
+        "providerName": "Local GPU",
+        "selectedModel": "AbyxV2 9B.gguf",
+        "selectedModelName": "AbyxV2 9B",
+        "reason": "Executed strictly on local RTX 5060 GPU"
+      },
+      "webSources": []
+    }
+  ],
+  "timestamp": 1795518865451,
+  "createdAt": "2026-11-24T11:14:25.451Z",
+  "updatedAt": "2026-11-24T11:14:25.464Z"
+}

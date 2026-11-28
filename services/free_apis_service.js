@@ -33,7 +33,7 @@ const PROVIDER_LIMITS = {
   gonka:       { maxRequests: 1000, period: 'month', label: '~1M tok/mo' },
   modelscope:  { maxRequests: 2000, period: 'day', label: '2,000 req/day' },
   siliconflow: { maxRequests: 500,  period: 'day', label: 'Free tier quota' },
-  local:       { maxRequests: 0,    period: 'unlimited', label: 'Unlimited (RTX 5060)' }
+  local:       { maxRequests: 0,    period: 'unlimited', label: 'Unlimited (Local GPU)' }
 };
 
 // Provider ID and operational metadata lookup table

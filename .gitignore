@@ -93,6 +93,8 @@ desktop.ini
 .backup_optimization/
 dist-electron/
 dist/
+setup.exe
+*.exe
 app/profile/
 give_pdf_report_*/
 mmake_mem_3d_*/

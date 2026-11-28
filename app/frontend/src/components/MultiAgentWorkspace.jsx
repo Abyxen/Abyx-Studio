@@ -545,8 +545,8 @@ export default function MultiAgentWorkspace({ activeProject, onOpenFile }) {
             <span className="text-neutral-300 font-semibold">{harnessConfig.textBackend.toUpperCase()}</span>
           </div>
           <div className="text-[10px] font-mono text-neutral-400 bg-white/[0.03] p-2 rounded border border-white/[0.06] flex flex-col gap-1">
-            <div className="text-white font-medium truncate">AMD Ryzen 9 8940HX (16c)</div>
-            <div className="truncate text-neutral-400">RTX 5060 Laptop (8GB VRAM)</div>
+            <div className="text-white font-medium truncate">Local Computing Engine</div>
+            <div className="truncate text-neutral-400">Hardware Accelerated Core</div>
             <div className="truncate text-cyan-400">{model} • Port 10086</div>
           </div>
         </div>
@@ -1454,7 +1454,7 @@ export default function MultiAgentWorkspace({ activeProject, onOpenFile }) {
                   <span className="text-neutral-400">Profile: {harnessConfig.performanceProfile}</span>
                 </div>
                 <div className="text-[10px] font-mono text-neutral-400">
-                  AMD Ryzen 9 8940HX • 16 cores • 31.05 GB RAM • NVIDIA RTX 5060 (7.93 GB VRAM)
+                  Local Hardware Engine • Unified Memory & Accelerated GPU Core
                 </div>
                 <div className="text-[9px] font-mono text-neutral-500">
                   Recommended: Context 4096, Threads 8, KV q8_0, Batch 512, Profile balanced

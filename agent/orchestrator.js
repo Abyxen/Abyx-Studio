@@ -74,7 +74,9 @@ class Orchestrator extends EventEmitter {
         result: t.result || null,
         error: t.error || null,
         maxRetries: t.maxRetries !== undefined ? t.maxRetries : 2,
-        retryCount: t.retryCount || 0
+        retryCount: t.retryCount || 0,
+        verification: t.verification || null,
+        verificationSteps: Array.isArray(t.verificationSteps) ? t.verificationSteps : null
       }));
     }
 
@@ -167,8 +169,27 @@ class Orchestrator extends EventEmitter {
       });
 
       const choice = response.choices && response.choices[0];
-      const resultText = choice?.message?.content || 'Task completed';
+      const resultText = choice?.message?.content || '';
       const reasoningText = choice?.message?.reasoning_content || '';
+
+      if (!resultText.trim()) {
+        throw new Error('Model returned no task result.');
+      }
+
+      // A text response is useful evidence for the next agent, but it cannot
+      // prove that code, files, tests, or acceptance criteria were satisfied.
+      // Completion remains a workflow state; verified success is decided only
+      // by a verification result attached by the caller/runtime.
+      let verification = task.verification?.passed === true
+        ? task.verification
+        : { passed: false, reason: 'No independent verification evidence was recorded for this task.' };
+      if (Array.isArray(task.verificationSteps) && task.verificationSteps.length > 0) {
+        if (!this.verificationEngine?.runSuite) {
+          verification = { passed: false, reason: 'Verification steps were supplied, but no verification engine is configured.' };
+        } else {
+          verification = await this.verificationEngine.runSuite({ steps: task.verificationSteps });
+        }
+      }
 
       // Record finding to shared memory
       this.sharedMemory.recordFinding({
@@ -179,7 +200,8 @@ class Orchestrator extends EventEmitter {
 
       this.taskStore.setTaskStatus(task.id, 'completed', {
         result: resultText,
-        reasoning: reasoningText
+        reasoning: reasoningText,
+        verification
       });
 
       this.checkpointer.saveTask({
@@ -188,14 +210,15 @@ class Orchestrator extends EventEmitter {
         result: resultText
       }, runId);
 
-      emitEvent('task:complete', {
+      emitEvent(verification.passed ? 'task:complete' : 'task:unverified', {
         taskId: task.id,
         agentId: task.agentId,
         result: resultText,
-        reasoning: reasoningText
+        reasoning: reasoningText,
+        verification
       });
 
-      return { ok: true, taskId: task.id, result: resultText };
+      return { ok: true, verified: verification.passed, taskId: task.id, result: resultText, verification };
     } catch (err) {
       task.retryCount = (task.retryCount || 0) + 1;
 
@@ -296,11 +319,14 @@ class Orchestrator extends EventEmitter {
         reason: 'Task is focused; executing with single specialist agent to eliminate DAG overhead'
       });
 
+      const requestedTask = Array.isArray(customTasks) && customTasks.length === 1 ? customTasks[0] : null;
       const singleTask = {
-        id: 'single_task_1',
-        description: goal,
-        agentId: 'developer',
-        dependencies: []
+        id: requestedTask?.id || 'single_task_1',
+        description: requestedTask?.description || requestedTask?.task || goal,
+        agentId: requestedTask?.agentId || 'developer',
+        dependencies: [],
+        verification: requestedTask?.verification || null,
+        verificationSteps: Array.isArray(requestedTask?.verificationSteps) ? requestedTask.verificationSteps : null
       };
       this.taskStore.clear();
       this.taskStore.createTask(singleTask);
@@ -309,7 +335,7 @@ class Orchestrator extends EventEmitter {
       const report = {
         runId,
         goal,
-        status: res.ok ? 'success' : 'failed',
+        status: res.ok ? (res.verified ? 'success' : 'requires_verification') : 'failed',
         mode: 'single_agent',
         totalTasks: 1,
         completedTasks: res.ok ? 1 : 0,
@@ -393,7 +419,8 @@ class Orchestrator extends EventEmitter {
     // 4. Result Aggregation
     const finalTasks = this.taskStore.listTasks();
     const hasFailed = finalTasks.some(t => t.status === 'failed');
-    const finalStatus = hasFailed ? 'failed_with_errors' : 'success';
+    const hasUnverified = finalTasks.some(t => t.status === 'completed' && t.verification?.passed !== true);
+    const finalStatus = hasFailed ? 'failed_with_errors' : (hasUnverified ? 'requires_verification' : 'success');
 
     const report = this.aggregateResults(runId, goal, finalTasks, finalStatus);
     emitEvent('orchestration:done', report);
@@ -411,6 +438,7 @@ class Orchestrator extends EventEmitter {
     const completed = tasks.filter(t => t.status === 'completed');
     const failed = tasks.filter(t => t.status === 'failed');
     const skipped = tasks.filter(t => t.status === 'skipped');
+    const unverified = completed.filter(t => t.verification?.passed !== true);
     const findings = this.sharedMemory.getAllFindings();
 
     const summaryParts = [
@@ -437,6 +465,12 @@ class Orchestrator extends EventEmitter {
       summaryParts.push('');
     }
 
+    if (unverified.length > 0) {
+      summaryParts.push('### Verification required:');
+      unverified.forEach(t => summaryParts.push(`- **${t.id} (${t.agentId}):** ${t.verification?.reason || 'No evidence recorded'}`));
+      summaryParts.push('');
+    }
+
     return {
       runId,
       goal,
@@ -446,6 +480,8 @@ class Orchestrator extends EventEmitter {
       completedTasks: completed.length,
       failedTasks: failed.length,
       skippedTasks: skipped.length,
+      verifiedTasks: completed.length - unverified.length,
+      unverifiedTasks: unverified.length,
       findings,
       tasks
     };

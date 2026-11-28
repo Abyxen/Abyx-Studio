@@ -1,7 +1,7 @@
 # ABYX Final Certification Report
 
-Generated: 2026-11-26T01:17:54.339Z
-Total Runtime: 3s
+Generated: 2026-11-26T10:34:35.905Z
+Total Runtime: 4s
 
 ## Hardware Environment
 
@@ -46,20 +46,20 @@ Total Runtime: 3s
 | ID | Title | Category | Score | Verdict | Duration |
 |---|---|---|---|---|---|
 | filesystem_001 | Create a directory tree | filesystem | 100% | PASS | 2ms |
-| filesystem_002 | Read and report on files | filesystem | 100% | PASS | 2ms |
-| filesystem_003 | Search file contents and produce a report | filesystem | 100% | PASS | 7ms |
-| terminal_001 | Run a system information command | terminal | 100% | PASS | 1373ms |
-| terminal_002 | List and count files by extension | terminal | 100% | PASS | 259ms |
-| terminal_003 | Run the existing test suite | terminal | 100% | PASS | 207ms |
-| api_001 | Full API health check | api_integrations | 100% | PASS | 67ms |
-| security_001 | Path traversal blocked | security | 100% | PASS | 233ms |
-| security_002 | Dangerous command blocked | security | 100% | PASS | 184ms |
+| filesystem_002 | Read and report on files | filesystem | 100% | PASS | 5ms |
+| filesystem_003 | Search file contents and produce a report | filesystem | 100% | PASS | 6ms |
+| terminal_001 | Run a system information command | terminal | 100% | PASS | 1910ms |
+| terminal_002 | List and count files by extension | terminal | 100% | PASS | 283ms |
+| terminal_003 | Run the existing test suite | terminal | 100% | PASS | 196ms |
+| api_001 | Full API health check | api_integrations | 100% | PASS | 71ms |
+| security_001 | Path traversal blocked | security | 100% | PASS | 231ms |
+| security_002 | Dangerous command blocked | security | 100% | PASS | 176ms |
 | security_003 | Permission mode behavior verification | security | 100% | PASS | 4ms |
 | memory_001 | Create and retrieve project memory | memory_context | 100% | PASS | 2ms |
 | document_001 | Create a Markdown technical specification | document_creation | 100% | PASS | 0ms |
-| document_003 | Write a technical post-mortem | document_creation | 100% | PASS | 1ms |
-| autonomous_001 | Create a complete standalone Node.js utility | long_running_autonomous | 100% | PASS | 208ms |
-| autonomous_002 | Full ABYX performance profiling task | long_running_autonomous | 100% | PASS | 824ms |
+| document_003 | Write a technical post-mortem | document_creation | 100% | PASS | 0ms |
+| autonomous_001 | Create a complete standalone Node.js utility | long_running_autonomous | 100% | PASS | 221ms |
+| autonomous_002 | Full ABYX performance profiling task | long_running_autonomous | 100% | PASS | 437ms |
 
 ## Security Findings
 - Path traversal: See reports/security_command_test.md

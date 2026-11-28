@@ -6,7 +6,7 @@
       "lastBackendBinary": "llama-server.exe",
       "lastSettings": {
         "threads": 16,
-        "contextSize": 32768,
+        "contextSize": 262144,
         "gpuLayers": -1,
         "cacheTypeK": "q4_0",
         "cacheTypeV": "q4_0",
@@ -14,7 +14,7 @@
         "ubatchSize": 512,
         "flashAttn": true
       },
-      "updatedAt": "2026-11-26T08:54:09.760Z"
+      "updatedAt": "2026-11-28T13:40:37.122Z"
     },
     "gemma-4-26B-A4B-it-uncensored-Q4_K_M.gguf": {
       "preferredBackend": "cuda",

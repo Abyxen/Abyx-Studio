@@ -32,6 +32,10 @@ const VerificationEngine = require('./verification/verification_engine');
 const ReviewerAgent = require('./verification/reviewer_agent');
 const AutonomousRecovery = require('./verification/autonomous_recovery');
 const BenchmarkSuite = require('./verification/benchmark_suite');
+const FsTool = require('./tools/fs_tool');
+const TerminalTool = require('./tools/terminal_tool');
+const BrowserTool = require('./tools/browser_tool');
+const LspTool = require('./tools/lsp_tool');
 
 /**
  * createAgentEngine - Master Factory Function for ABYX Agent Subsystem
@@ -55,7 +59,8 @@ function createAgentEngine(options = {}) {
   const securityEngine = new SecurityEngine({
     workspaceRoot,
     mode: options.mode || 'build',
-    approvalTimeoutMs: options.approvalTimeoutMs || 180000
+    approvalTimeoutMs: options.approvalTimeoutMs || 180000,
+    permissionMode: options.permissionMode || 'approve for me'
   });
 
   const workspaceIsolation = new WorkspaceIsolation(workspaceRoot, gitAdapter, options);
@@ -94,9 +99,16 @@ function createAgentEngine(options = {}) {
   });
 
   const executionLoop = new AgentExecutionLoop({
-    modelRouter,
-    toolGateway,
+    pathGuard,
     policyEngine,
+    fsTool: toolGateway.fsTool,
+    terminalTool: toolGateway.terminalTool,
+    browserTool: toolGateway.browserTool,
+    lspTool: toolGateway.lspTool,
+    providerRegistry,
+    toolRegistry: toolGateway.registry,
+    toolGateway,
+    modelRouter,
     logger,
     options: {
       maxSteps: options.maxSteps || 15
@@ -135,6 +147,9 @@ function createAgentEngine(options = {}) {
     gitAdapter,
     pathGuard
   });
+  // The orchestrator owns scheduling; verification remains an independent
+  // service and is injected explicitly so task reports cannot self-certify.
+  orchestrator.verificationEngine = verificationEngine;
 
   const reviewerAgent = options.reviewerAgent || new ReviewerAgent({
     workspaceRoot,
@@ -174,9 +189,18 @@ function createAgentEngine(options = {}) {
     modelAdapter,
     cancellationManager,
     executionLoop,
+    engine: executionLoop,
     orchestrator,
     logger,
-    modelRouter
+    modelRouter,
+    fsTool: toolGateway.fsTool,
+    terminalTool: toolGateway.terminalTool,
+    browserTool: toolGateway.browserTool,
+    lspTool: toolGateway.lspTool,
+    pythonDocTool: toolGateway.pythonDocTool,
+    playwrightBrowserTool: toolGateway.playwrightBrowserTool,
+    researchTool: toolGateway.researchTool,
+    processManager: toolGateway.processManager
   };
 }
 
@@ -188,7 +212,9 @@ module.exports = {
   ToolGateway,
   ToolRegistry,
   AgentExecutionLoop,
+  AgentExecutionEngine: AgentExecutionLoop,
   Orchestrator,
+  AgentOrchestrator: Orchestrator,
   TaskScheduler,
   TaskStore,
   EventStore,
@@ -214,5 +240,12 @@ module.exports = {
   VerificationEngine,
   ReviewerAgent,
   AutonomousRecovery,
-  BenchmarkSuite
+  BenchmarkSuite,
+  WorkspaceFsTool: FsTool,
+  ControlledTerminalTool: TerminalTool,
+  ControlledBrowserTool: BrowserTool,
+  FsTool,
+  TerminalTool,
+  BrowserTool,
+  LspTool
 };

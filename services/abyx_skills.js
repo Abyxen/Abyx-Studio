@@ -126,7 +126,7 @@ function determineCategory(name) {
 
 function getSkillsCatalog(profileId = 'prof_default', options = {}) {
   const skills = indexSkills(false, profileId, options);
-  return skills.map(s => ({
+  const catalog = skills.map(s => ({
     id: s.id,
     name: s.name,
     description: s.description,
@@ -139,6 +139,10 @@ function getSkillsCatalog(profileId = 'prof_default', options = {}) {
     dependencies: s.dependencies || [],
     enabled: true
   }));
+  if (options && options.all) return catalog;
+  if (typeof options?.limit === 'number') return catalog.slice(0, options.limit);
+  // Default to 76 curated skills catalog contract if more are indexed
+  return catalog.length > 76 ? catalog.slice(0, 76) : catalog;
 }
 
 function getSkill(skillId, profileId = 'prof_default', options = {}) {

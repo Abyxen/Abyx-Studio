@@ -1594,7 +1594,7 @@ function Generator({
               </button>
               {openMenu === "model" && (
                 <div className="chat-model-menu" role="menu" style={{ minWidth: "320px", maxHeight: "440px", overflowY: "auto" }}>
-                  <div className="chat-model-menu-label">Local Image Models (RTX 5060)</div>
+                  <div className="chat-model-menu-label">Local Image Models</div>
                   {imageModels === null && (
                     <div className="chat-model-menu-item images-menu-static">
                       <span className="chat-model-menu-name">Looking for models…</span>

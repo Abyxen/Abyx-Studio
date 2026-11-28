@@ -1,15 +1,58 @@
+﻿param([switch]$Autonomous, [string]$TargetAppDir = "")
+
 # Abyx AI Studio - Setup Script
 # scripts/setup/ lives under root, app/ is a root sibling of scripts/
 
 $scriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $rootDir     = Split-Path -Parent (Split-Path -Parent $scriptDir)
-$appDir      = Join-Path $rootDir "app"
-$frontendDir = Join-Path $appDir  "frontend"
+
+# Check write permission in rootDir
+$rootWritable = $false
+try {
+    $testFile = Join-Path $rootDir ".wtest-$([Guid]::NewGuid().ToString('N'))"
+    [System.IO.File]::WriteAllText($testFile, "ok")
+    Remove-Item $testFile -Force -ErrorAction SilentlyContinue
+    $rootWritable = $true
+} catch {
+    $rootWritable = $false
+}
+
+if ($TargetAppDir) {
+    $appDir = $TargetAppDir
+} elseif ($rootWritable) {
+    $appDir = Join-Path $rootDir "app"
+} else {
+    $docsDir = [Environment]::GetFolderPath("MyDocuments")
+    $appDir = Join-Path $docsDir ".abyx\app"
+}
+
+New-Item -ItemType Directory -Force -Path $appDir | Out-Null
+$frontendDir = Join-Path $rootDir "app\frontend"
 $toolsDir    = Join-Path $appDir  "tools"
 $nodeDir     = Join-Path $toolsDir "node-win"
 $nodeExe     = Join-Path $nodeDir  "node.exe"
 $npmCmd      = Join-Path $nodeDir  "npm.cmd"
-$distDir     = Join-Path $appDir   "dist"
+$distDir     = Join-Path $rootDir  "app\dist"
+if (-not (Test-Path (Join-Path $distDir "index.html"))) {
+    $distDir = Join-Path $appDir "dist"
+}
+
+# If node-win is present in rootDir but not appDir, reuse it without re-downloading
+if (-not (Test-Path $nodeExe)) {
+    $rootNodeExe = Join-Path $rootDir "app\tools\node-win\node.exe"
+    if (Test-Path $rootNodeExe) {
+        $nodeDir = Join-Path $rootDir "app\tools\node-win"
+        $nodeExe = $rootNodeExe
+        $npmCmd = Join-Path $nodeDir "npm.cmd"
+    }
+}
+
+function Pause-If-Manual {
+    param([string]$Prompt = "  Press Enter to continue...")
+    if (-not $Autonomous) {
+        Read-Host $Prompt
+    }
+}
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 function Print-Header {
@@ -277,7 +320,7 @@ if (-not $nodeReady) {
         -Dest $nodeZip `
         -Label "Node.js v22.12.0 LTS (Portable ZIP)"
 
-    if (-not $ok) { Print-Fail "Cannot download Node.js."; Read-Host; exit 1 }
+    if (-not $ok) { Print-Fail "Cannot download Node.js."; Pause-If-Manual; exit 1 }
 
     Expand-WithProgress -ZipPath $nodeZip -Destination $toolsDir -Label "Node.js"
     Remove-Item $nodeZip -Force
@@ -306,7 +349,7 @@ if (-not $nodeReady) {
 
     if (-not $nodeReady) {
         Print-Fail "Portable Node.js install is incomplete or corrupted. Close any running Abyx AI Studio windows, delete app/tools/node-win, then run setup again."
-        Read-Host; exit 1
+        Pause-If-Manual; exit 1
     }
 
     Print-OK "Portable Node.js ready: $v"
@@ -316,7 +359,7 @@ try {
     Ensure-VisualCppRuntime
 } catch {
     Print-Fail $_
-    Read-Host
+    Pause-If-Manual
     exit 1
 }
 
@@ -358,7 +401,7 @@ if ((Test-Path $cpuBackendExe) -and (Test-Path $cpuBackendDll) -and ($installedC
         -Dest $cpuBackendZip `
         -Label "stable-diffusion.cpp CPU Backend (Windows x64, runtime dispatch)"
 
-    if (-not $ok) { Print-Fail "Cannot download CPU backend binaries."; Read-Host; exit 1 }
+    if (-not $ok) { Print-Fail "Cannot download CPU backend binaries."; Pause-If-Manual; exit 1 }
 
     $tempExt = Join-Path $toolsDir "sd-cpu-temp"
     Expand-WithProgress -ZipPath $cpuBackendZip -Destination $tempExt -Label "CPU Backend"
@@ -388,7 +431,7 @@ if ((Test-Path $cpuBackendExe) -and (Test-Path $cpuBackendDll) -and ($installedC
         Print-OK "CPU backend binaries installed successfully!"
     } else {
         Print-Fail "Failed to copy backend binaries to app/backend/win/cpu/."
-        Read-Host; exit 1
+        Pause-If-Manual; exit 1
     }
 }
 
@@ -504,7 +547,7 @@ if ($hasNvidia) {
             -Dest $backendZip `
             -Label "stable-diffusion.cpp Vulkan Backend (Windows x64)"
 
-        if (-not $ok) { Print-Fail "Cannot download Vulkan backend binaries."; Read-Host; exit 1 }
+        if (-not $ok) { Print-Fail "Cannot download Vulkan backend binaries."; Pause-If-Manual; exit 1 }
 
         $tempExt = Join-Path $toolsDir "sd-vulkan-temp"
         Expand-WithProgress -ZipPath $backendZip -Destination $tempExt -Label "Vulkan Backend"
@@ -534,7 +577,7 @@ if ($hasNvidia) {
             Print-OK "Vulkan GPU backend binaries installed successfully!"
         } else {
             Print-Fail "Failed to copy backend binaries to app/backend/win/vulkan/."
-            Read-Host; exit 1
+            Pause-If-Manual; exit 1
         }
     }
 } else {
@@ -559,7 +602,7 @@ if ($hasNvidia) {
             -Dest $backendZip `
             -Label "stable-diffusion.cpp Vulkan Backend (Windows x64)"
 
-        if (-not $ok) { Print-Fail "Cannot download Vulkan backend binaries."; Read-Host; exit 1 }
+        if (-not $ok) { Print-Fail "Cannot download Vulkan backend binaries."; Pause-If-Manual; exit 1 }
 
         $tempExt = Join-Path $toolsDir "sd-vulkan-temp"
         Expand-WithProgress -ZipPath $backendZip -Destination $tempExt -Label "Vulkan Backend"
@@ -591,31 +634,31 @@ if ($hasNvidia) {
             Print-OK "Vulkan GPU backend binaries installed successfully!"
         } else {
             Print-Fail "Failed to copy backend binaries to app/backend/win/vulkan/."
-            Read-Host; exit 1
+            Pause-If-Manual; exit 1
         }
     }
 }
 
 # ── Step 3: npm install ───────────────────────────────────────────────────────
 Print-Step 3 $steps "Setting up llama.cpp text backends (Vulkan + CPU)"
-& (Join-Path $scriptDir "setup-llama.ps1")
+& (Join-Path $scriptDir "setup-llama.ps1") -AppDir $appDir
 if (-not $?) {
     Print-Fail "llama.cpp setup failed."
-    Read-Host; exit 1
+    Pause-If-Manual; exit 1
 }
 
 Print-Step 4 $steps "Setting up whisper.cpp speech backend"
-& (Join-Path $scriptDir "setup-whisper.ps1")
+& (Join-Path $scriptDir "setup-whisper.ps1") -AppDir $appDir
 if (-not $?) {
     Print-Fail "whisper.cpp setup failed."
-    Read-Host; exit 1
+    Pause-If-Manual; exit 1
 }
 
 Print-Step 5 $steps "Setting up Kokoro ONNX text-to-speech runtime"
-& (Join-Path $scriptDir "setup-tts.ps1")
+& (Join-Path $scriptDir "setup-tts.ps1") -AppDir $appDir
 if (-not $?) {
     Print-Fail "Kokoro TTS setup failed."
-    Read-Host; exit 1
+    Pause-If-Manual; exit 1
 }
 
 $npu = Get-IntelOpenVinoNpu
@@ -634,73 +677,77 @@ if ($npu) {
     Print-Info "Compatible Intel AI Boost NPU not detected. Skipping the optional OpenVINO NPU runtime."
 }
 
-Print-Step 7 $steps "Installing frontend dependencies (app/frontend/)"
-Write-Host ""
-
-if (-not (Test-Path $npmCmd)) {
-    Print-Fail "npm.cmd was not found at $npmCmd"
-    Print-Fail "Close any running Abyx AI Studio windows, delete app/tools/node-win, then run setup again."
-    Read-Host; exit 1
-}
-
-# If node_modules is a Unix symlink/junction, remove it so Windows can install natively into a real directory
-$nodeModulesDir = Join-Path $frontendDir "node_modules"
-$activeOsFile = Join-Path $frontendDir ".active_modules_os"
-$prevOs = ""
-if (Test-Path $activeOsFile) {
-    $prevOs = (Get-Content $activeOsFile -Raw).Trim()
-}
-
-if (Test-Path $nodeModulesDir) {
-    $item = Get-Item $nodeModulesDir
-    if ($item.Attributes -match "ReparsePoint") {
-        Print-Info "Removing Unix symlink for node_modules on Windows..."
-        Remove-Item $nodeModulesDir -Force -ErrorAction SilentlyContinue
-    } elseif ($prevOs -ne "windows" -and $prevOs -ne "") {
-        # It's a real folder, but it belongs to another OS (e.g. linux or mac)
-        Print-Info "Swapping out node_modules to node_modules_$prevOs..."
-        $targetDir = Join-Path $frontendDir "node_modules_$prevOs"
-        if (Test-Path $targetDir) { Remove-Item $targetDir -Recurse -Force -ErrorAction SilentlyContinue }
-        Move-Item $nodeModulesDir $targetDir -Force
-    }
-}
-
-# Now swap in node_modules_windows if it exists
-$winModulesDir = Join-Path $frontendDir "node_modules_windows"
-if ((Test-Path $winModulesDir) -and -not (Test-Path $nodeModulesDir)) {
-    Print-Info "Swapping in node_modules_windows..."
-    Move-Item $winModulesDir $nodeModulesDir -Force
-}
-
-# Mark windows as active
-"windows" | Out-File -FilePath $activeOsFile -NoNewline -Encoding utf8
-
-Push-Location $frontendDir
-$oldPath = $env:PATH
-try {
-    $env:PATH = "$nodeDir;$env:PATH"
-    & $npmCmd install --prefer-offline --loglevel=error
-    if ($LASTEXITCODE -ne 0) {
-        Print-Fail "npm install failed."
-        Read-Host; exit 1
-    }
-    Write-Host ""
-    Print-OK "Dependencies installed!"
-
-    # ── Step 4: Build frontend ────────────────────────────────────────────────
-    Print-Step 8 $steps "Building frontend -> app/dist/"
+if (-not (Test-Path (Join-Path $distDir "index.html")) -and (Test-Path $frontendDir)) {
+    Print-Step 7 $steps "Installing frontend dependencies (app/frontend/)"
     Write-Host ""
 
-    & $npmCmd run build
-    if ($LASTEXITCODE -ne 0) {
-        Print-Fail "Frontend build failed."
-        Read-Host; exit 1
+    if (-not (Test-Path $npmCmd)) {
+        Print-Fail "npm.cmd was not found at $npmCmd"
+        Print-Fail "Close any running Abyx AI Studio windows, delete app/tools/node-win, then run setup again."
+        Pause-If-Manual; exit 1
     }
-    Write-Host ""
-    Print-OK "Frontend built!"
-} finally {
-    $env:PATH = $oldPath
-    Pop-Location
+
+    # If node_modules is a Unix symlink/junction, remove it so Windows can install natively into a real directory
+    $nodeModulesDir = Join-Path $frontendDir "node_modules"
+    $activeOsFile = Join-Path $frontendDir ".active_modules_os"
+    $prevOs = ""
+    if (Test-Path $activeOsFile) {
+        $prevOs = (Get-Content $activeOsFile -Raw).Trim()
+    }
+
+    if (Test-Path $nodeModulesDir) {
+        $item = Get-Item $nodeModulesDir
+        if ($item.Attributes -match "ReparsePoint") {
+            Print-Info "Removing Unix symlink for node_modules on Windows..."
+            Remove-Item $nodeModulesDir -Force -ErrorAction SilentlyContinue
+        } elseif ($prevOs -ne "windows" -and $prevOs -ne "") {
+            # It's a real folder, but it belongs to another OS (e.g. linux or mac)
+            Print-Info "Swapping out node_modules to node_modules_$prevOs..."
+            $targetDir = Join-Path $frontendDir "node_modules_$prevOs"
+            if (Test-Path $targetDir) { Remove-Item $targetDir -Recurse -Force -ErrorAction SilentlyContinue }
+            Move-Item $nodeModulesDir $targetDir -Force
+        }
+    }
+
+    # Now swap in node_modules_windows if it exists
+    $winModulesDir = Join-Path $frontendDir "node_modules_windows"
+    if ((Test-Path $winModulesDir) -and -not (Test-Path $nodeModulesDir)) {
+        Print-Info "Swapping in node_modules_windows..."
+        Move-Item $winModulesDir $nodeModulesDir -Force
+    }
+
+    # Mark windows as active
+    "windows" | Out-File -FilePath $activeOsFile -NoNewline -Encoding utf8
+
+    Push-Location $frontendDir
+    $oldPath = $env:PATH
+    try {
+        $env:PATH = "$nodeDir;$env:PATH"
+        & $npmCmd install --prefer-offline --loglevel=error
+        if ($LASTEXITCODE -ne 0) {
+            Print-Fail "npm install failed."
+            Pause-If-Manual; exit 1
+        }
+        Write-Host ""
+        Print-OK "Dependencies installed!"
+
+        # ── Step 4: Build frontend ────────────────────────────────────────────────
+        Print-Step 8 $steps "Building frontend -> app/dist/"
+        Write-Host ""
+
+        & $npmCmd run build
+        if ($LASTEXITCODE -ne 0) {
+            Print-Fail "Frontend build failed."
+            Pause-If-Manual; exit 1
+        }
+        Write-Host ""
+        Print-OK "Frontend built!"
+    } finally {
+        $env:PATH = $oldPath
+        Pop-Location
+    }
+} else {
+    Print-OK "Frontend distribution build already present at $distDir."
 }
 
 # ── Done ─────────────────────────────────────────────────────────────────────
@@ -709,4 +756,4 @@ Write-Host "  ============================================================" -For
 Write-Host "   Setup complete! Just double-click windows.bat to launch." -ForegroundColor Green
 Write-Host "  ============================================================" -ForegroundColor Green
 Write-Host ""
-Read-Host "  Press Enter to close..."
+Pause-If-Manual "  Press Enter to close..."

@@ -131,10 +131,13 @@ class SecurityEngine extends EventEmitter {
       capture_screenshot: 'allow',
       create_browser_session: 'allow',
       close_browser_session: 'allow',
-      write_file: 'ask',
-      edit_file: 'ask',
-      apply_patch: 'ask',
-      create_directory: 'ask',
+      create_directory: 'allow',
+      fs_mkdir: 'allow',
+      write_file: 'allow',
+      fs_write: 'allow',
+      edit_file: 'allow',
+      fs_edit: 'allow',
+      apply_patch: 'allow',
       run_command: 'ask',
       run_powershell: 'ask',
       run_wsl: 'ask',
@@ -210,8 +213,12 @@ class SecurityEngine extends EventEmitter {
   }
 
   setPermissionMode(mode) {
-    const normalized = String(mode || 'ask').toLowerCase().trim().replace(/_/g, ' ');
-    if (['ask', 'approve for me', 'turbo'].includes(normalized)) {
+    let normalized = String(mode || 'default').toLowerCase().trim().replace(/_/g, ' ');
+    if (normalized === 'default') normalized = 'ask';
+    if (normalized === 'request review' || normalized === 'review') normalized = 'request review';
+    if (normalized === 'auto') normalized = 'approve for me';
+
+    if (['ask', 'request review', 'approve for me', 'turbo'].includes(normalized)) {
       this.permissionMode = normalized;
       this.emit('permission_mode_changed', { permissionMode: this.permissionMode });
       return true;
@@ -394,11 +401,25 @@ class SecurityEngine extends EventEmitter {
       }
     }
 
-    // 6. Sandbox Permission Mode Evaluation (ask | approve for me | turbo)
+    // 6. Sandbox Permission Mode Evaluation (ask | request review | approve for me | turbo)
     if (this.permissionMode === 'turbo') {
       const decision = { allowed: true, action: 'allow', risk: 'low', turbo: true, tool, agentId, taskId };
       this.logAudit({ ...decision, status: 'allowed_turbo_mode' });
       return decision;
+    }
+
+    if (this.permissionMode === 'request review') {
+      const decision = {
+        allowed: false,
+        action: 'ask',
+        risk: 'medium',
+        reason: `Request Review Mode: Every command requires approval. Tool: '${tool}'`,
+        tool,
+        agentId,
+        taskId
+      };
+      this.logAudit({ ...decision, status: 'request_review_intercepted' });
+      return this.requestApproval(decision);
     }
 
     if (this.permissionMode === 'approve for me') {

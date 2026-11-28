@@ -147,7 +147,7 @@ tags:
 ABYX is an autonomous, agentic companion and coding assistant powered by local neural runtimes and cloud models with multi-modal tools, web browsing, living memory, and deep Obsidian vault integration.
 
 ## ️ Key Capabilities
-- **Local Neural Engine**: Local model runtime running on dedicated RTX 5060 GPU with 8GB VRAM.
+- **Local Neural Engine**: Local model runtime running on dedicated accelerator.
 - **Living Brain**: SQLite dual-state memory architecture with autonomous background reviewing.
 - **Obsidian Second Brain**: Bi-directional Markdown sync for permanent, visual knowledge graphing.
 - **In-App Web Browser**: Chrome-like live web browsing with real-time proxying.

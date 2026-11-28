@@ -35,6 +35,17 @@ const SECRET_SCRUB_PATTERNS = [
 class ExecutionLogger {
   constructor(runId = null) {
     this.runId = runId;
+    this.events = [];
+  }
+
+  recordEvent(event) {
+    const scrubbed = ExecutionLogger.scrub(event);
+    this.events.push(scrubbed);
+    return scrubbed;
+  }
+
+  getEvents() {
+    return this.events || [];
   }
 
   scrub(data) {
